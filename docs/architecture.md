@@ -16,10 +16,12 @@ MdBolsa.Data       SQLite-backed implementation of Core's storage
                     interfaces: note index, links/backlinks, tags,
                     search index, sync metadata. Pure .NET (net8.0).
 
-MdBolsa.Desktop.WinUI   WinUI 3 shell (net8.0-windows10.0.19041.0).
-                    Composition root (DI wiring), views/viewmodels,
-                    filesystem watcher. Contains no business logic.
-                    Created in Phase 1 (see its README placeholder).
+MdBolsa.Desktop.WinUI   WinUI 3 shell (net8.0-windows10.0.26100.0, single
+                    x64 platform — see note below). Composition root (DI
+                    wiring), views/viewmodels, filesystem watcher.
+                    Contains no business logic yet. Scaffolded in Phase 1
+                    via the official `dotnet new winui3` CLI template
+                    (Visual Studio is not required to build or run it).
 
 MdBolsa.Server     ASP.NET Core sync/storage server. Created in Phase 8.
 ```
@@ -101,9 +103,31 @@ SSD later is a bind-mount + data-copy operation, not a code change.
   `revision`, `content_hash`, and `updated_at` columns from Phase 2 so this
   isn't a migration later.
 
-## Verified Working (Phase 0)
+## WinUI Project Notes (Phase 1)
 
-`dotnet build src/MdBolsa.sln` builds `MdBolsa.Core`, `MdBolsa.Data`, and
-both test projects cleanly. `MdBolsa.Desktop.WinUI` is not part of the
-solution yet — see its
-[README](../src/Client/MdBolsa.Desktop.WinUI/README.md).
+- The template defaults to `<Platforms>x86;x64;ARM64</Platforms>`,
+  narrowed to `x64` only — this is the only platform this project
+  targets today, and multi-platform output paths (`bin\$(Platform)\...`)
+  were also incompatible with the WinApp CLI's `dotnet run` path
+  resolution as of `Microsoft.Windows.SDK.BuildTools.WinApp` 0.6.1
+  (preview). Revisit if ARM64/x86 support is ever needed.
+- Running the app locally (not just building it) requires **Windows
+  Developer Mode** enabled (Settings → Privacy & security → For
+  developers), since it launches as a debug-registered packaged app
+  without a signed MSIX. See [development.md](development.md).
+- Plain `dotnet run` does not perform debug package-identity
+  registration correctly for this (preview) tooling — it launches the
+  raw `.exe` directly, which fails with `REGDB_E_CLASSNOTREG` even with
+  Developer Mode on. Use the `winapp` CLI (`Microsoft.Windows.SDK.BuildTools.WinApp`)
+  to run instead; it builds, installs any missing Windows App Runtime
+  MSIX packages, registers a loose-layout package, and launches via
+  AUMID. See [development.md](development.md) for the exact command.
+
+## Verified Working
+
+- `dotnet build src/MdBolsa.sln` / `dotnet test src/MdBolsa.sln` pass for
+  all five projects, using only the .NET 8 SDK and Visual Studio Build
+  Tools 2022 — no full Visual Studio IDE required.
+- The WinUI 3 shell actually launches: confirmed a live process with
+  `MainWindowTitle` "mdbolsa" and ~120MB working set on a Debug build
+  (2026-09-16).

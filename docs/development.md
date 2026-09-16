@@ -3,9 +3,15 @@
 ## Prerequisites
 
 - .NET 8 SDK (currently installed: 8.0.418)
-- Visual Studio 2022 with the **.NET Desktop Development** and
-  **Windows App SDK (WinUI)** workloads — required starting Phase 1, not
-  needed to build Core/Data/tests today.
+- **Windows Developer Mode enabled** — Settings → Privacy & security →
+  For developers → Developer Mode. Required to run/sideload
+  `MdBolsa.Desktop.WinUI` locally without a signed MSIX. Not needed just
+  to build.
+- No Visual Studio IDE is required. The WinUI 3 project was scaffolded
+  and is built/run entirely via the .NET CLI (`dotnet new winui3` +
+  Microsoft's official CLI templates/tooling) plus Visual Studio Build
+  Tools 2022 (already installed on this machine, providing MSBuild/C++
+  toolchain bits the Windows SDK build tools need).
 
 ## Build & Test
 
@@ -14,8 +20,25 @@ dotnet build src/MdBolsa.sln
 dotnet test src/MdBolsa.sln
 ```
 
-`MdBolsa.Desktop.WinUI` isn't part of the solution yet (Phase 1); only
-`MdBolsa.Core`, `MdBolsa.Data`, and their test projects build today.
+## Run the Desktop Shell
+
+Plain `dotnet run` does **not** correctly register the debug package
+identity with this (preview) tooling and will fail with
+`REGDB_E_CLASSNOTREG`. Use the `winapp` CLI directly instead — it ships
+inside the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, not
+as an installable `dotnet tool`:
+
+```bash
+"$HOME/.nuget/packages/microsoft.windows.sdk.buildtools.winapp/<version>/tools/win-x64/winapp.exe" \
+  run src/Client/MdBolsa.Desktop.WinUI/MdBolsa.Desktop.WinUI.csproj -c Debug --arch x64 --detach
+```
+
+Substitute the installed `<version>` (check the folder, or the
+`Microsoft.Windows.SDK.BuildTools.WinApp` `PackageReference` version in
+`MdBolsa.Desktop.WinUI.csproj`). Requires Developer Mode (Settings →
+Privacy & security → For developers). First run also installs any
+missing Windows App Runtime MSIX packages and registers a loose-layout
+package — no manual MSIX install step needed.
 
 ## Environments
 
