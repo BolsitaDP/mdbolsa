@@ -10,11 +10,13 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 1 — Native Windows shell.** The WinUI 3 shell builds and runs,
-verified as a live native window (title "mdbolsa") — no Visual Studio
-IDE needed, only the .NET CLI. See
+**Phase 2 — Local Markdown vault.** The vault scanner assigns each note
+a stable id (frontmatter), indexes it into SQLite, and detects
+adds/edits/renames/deletes on rescan — verified live end to end
+(scan → index → rescan is idempotent) via the WinUI shell's vault path
+box and "Rescan vault" button. See
 [docs/vision.md §17](docs/vision.md#17-phased-roadmap) for the full phase
-roadmap. Next up: **Phase 2 — Local Markdown vault.**
+roadmap. Next up: **Phase 3 — Editor.**
 
 ## Structure
 
@@ -38,8 +40,10 @@ dotnet test src/MdBolsa.sln
 Running the WinUI 3 shell (not just building it) requires Windows
 Developer Mode enabled and the `winapp` CLI (plain `dotnet run` doesn't
 register the debug package identity correctly with this preview
-tooling). See [docs/development.md](docs/development.md) for the exact
-command and the full dev setup / branching workflow.
+tooling). Once it's running, type a vault folder path (e.g.
+`samples/dev-vault`, as an absolute path) into the text box and click
+"Rescan vault". See [docs/development.md](docs/development.md) for the
+exact run command and the full dev setup / branching workflow.
 
 ## Principles
 

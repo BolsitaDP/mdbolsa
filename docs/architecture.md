@@ -93,15 +93,35 @@ SSD later is a bind-mount + data-copy operation, not a code change.
 
 ## Open Questions Flagged for Later Phases (not decided now)
 
-- **Stable note identity.** Path-based identity breaks under
-  rename/move across devices, which matters once sync (Phase 9) exists.
-  Options: a stable ID in YAML frontmatter (portable, visible) vs.
-  path+content-hash rename heuristics (closer to Obsidian's approach).
-  Decide in Phase 2 when the vault/indexing schema is designed.
 - **Where note history lives** (Phase 10): SQLite blobs, on-disk
-  snapshots, or Pi-side history only. The local schema should reserve
-  `revision`, `content_hash`, and `updated_at` columns from Phase 2 so this
+  snapshots, or Pi-side history only. The local schema already reserves
+  `revision`, `content_hash`, and `updated_at` columns (Phase 2) so this
   isn't a migration later.
+
+## Vault Indexing (Phase 2)
+
+Stable note identity resolved: see
+[0005-stable-note-identity](decisions/0005-stable-note-identity.md).
+Concretely:
+
+- `MdBolsa.Core.Vault`: `NoteMetadata`, `IVaultIndex` (the storage
+  interface), `FrontMatter` (minimal `id:` read/inject, deliberately not
+  a full YAML parser), and `VaultScanner` (walks `*.md` files, assigns
+  ids, hashes content, diffs against the existing index to produce
+  added/updated/moved/deleted/unchanged counts).
+- `MdBolsa.Data.Vault.SqliteVaultIndex` implements `IVaultIndex` against
+  a `notes` table (`id` primary key, `path`, `title`, `content_hash`,
+  `revision`, `created_at`, `updated_at`). Schema created via
+  `CREATE TABLE IF NOT EXISTS` on construction — no migration framework
+  yet; one is only worth building once a later phase needs to *alter*
+  an existing table shape, not just add new tables.
+- No new NuGet dependencies were needed (`Guid`, `SHA256` are BCL).
+  Markdig/YamlDotNet/DI are still deferred until Phase 3+ actually needs
+  them (see Dependencies table above).
+- The WinUI shell exercises this for real: a text box for a vault path
+  plus a "Rescan vault" button that runs `VaultScanner` against
+  `SqliteVaultIndex` and lists what it found — a smoke test, not the
+  editor (Phase 3).
 
 ## WinUI Project Notes (Phase 1)
 
@@ -122,6 +142,17 @@ SSD later is a bind-mount + data-copy operation, not a code change.
   to run instead; it builds, installs any missing Windows App Runtime
   MSIX packages, registers a loose-layout package, and launches via
   AUMID. See [development.md](development.md) for the exact command.
+- Packaged apps get `%LOCALAPPDATA%` (and similar special folders)
+  silently redirected to a per-package virtualized location
+  (`%LOCALAPPDATA%\Packages\<PackageFamilyName>\...`), even though this
+  one runs `runFullTrust` and isn't AppContainer-sandboxed. This is
+  invisible from *inside* the app (`Environment.GetFolderPath` "just
+  works" and is consistent across the app's own reads/writes), but it
+  means nothing written from *outside* the packaged process (e.g. a
+  config file dropped there by a script or by us during manual testing)
+  is visible to the app. Don't rely on external processes writing into
+  the packaged app's `%LOCALAPPDATA%` - drive configuration through the
+  app's own UI instead (see the vault path text box in Phase 2).
 
 ## Verified Working
 
