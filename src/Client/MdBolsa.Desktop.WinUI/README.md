@@ -1,20 +1,21 @@
-# MdBolsa.Desktop.WinUI (placeholder)
+# MdBolsa.Desktop.WinUI
 
-This project is intentionally **not scaffolded yet**.
+The WinUI 3 shell (Phase 1). Scaffolded via the official
+[dotnet CLI WinUI templates](https://devblogs.microsoft.com/ifdef-windows/introducing-dotnet-new-templates-for-winui/)
+(`dotnet new winui3`), not Visual Studio — no IDE is required to build or
+run it, only the .NET SDK.
 
-Phase 0 stops at repository/architecture setup. The actual WinUI 3 project
-(`App.xaml`, `MainWindow.xaml`, `Package.appxmanifest`, and the `.csproj` with
-correct Windows App SDK wiring) is Phase 1's deliverable ("Native Windows
-shell"), and is created from Visual Studio 2022's WinUI 3 project template so
-the generated packaging/manifest files are correct out of the box.
+Contains no business logic — it composes and displays
+[`MdBolsa.Core`](../MdBolsa.Core) and [`MdBolsa.Data`](../MdBolsa.Data),
+referenced here but not yet wired into any UI (that starts in Phase 2,
+once there's a vault to load).
 
-Requirements before Phase 1 can start:
-- Visual Studio 2022 with the **.NET Desktop Development** and
-  **Windows App SDK (WinUI)** workloads/components installed.
+## Run
 
-Once created, this project will:
-- Target `net8.0-windows10.0.19041.0`.
-- Contain no business logic — it is a thin shell that composes and displays
-  [`MdBolsa.Core`](../MdBolsa.Core) and [`MdBolsa.Data`](../MdBolsa.Data) via
-  dependency injection.
-- Be added to [`../../MdBolsa.sln`](../../MdBolsa.sln).
+```bash
+dotnet run --project src/Client/MdBolsa.Desktop.WinUI
+```
+
+First run registers a dev package identity via the `winapp` CLI
+(provided by `Microsoft.Windows.SDK.BuildTools.WinApp`) and launches the
+app with package identity — no manual MSIX install step needed.

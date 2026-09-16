@@ -3,9 +3,15 @@
 ## Prerequisites
 
 - .NET 8 SDK (currently installed: 8.0.418)
-- Visual Studio 2022 with the **.NET Desktop Development** and
-  **Windows App SDK (WinUI)** workloads — required starting Phase 1, not
-  needed to build Core/Data/tests today.
+- **Windows Developer Mode enabled** — Settings → Privacy & security →
+  For developers → Developer Mode. Required to run/sideload
+  `MdBolsa.Desktop.WinUI` locally without a signed MSIX. Not needed just
+  to build.
+- No Visual Studio IDE is required. The WinUI 3 project was scaffolded
+  and is built/run entirely via the .NET CLI (`dotnet new winui3` +
+  Microsoft's official CLI templates/tooling) plus Visual Studio Build
+  Tools 2022 (already installed on this machine, providing MSBuild/C++
+  toolchain bits the Windows SDK build tools need).
 
 ## Build & Test
 
@@ -14,8 +20,17 @@ dotnet build src/MdBolsa.sln
 dotnet test src/MdBolsa.sln
 ```
 
-`MdBolsa.Desktop.WinUI` isn't part of the solution yet (Phase 1); only
-`MdBolsa.Core`, `MdBolsa.Data`, and their test projects build today.
+## Run the Desktop Shell
+
+```bash
+dotnet run --project src/Client/MdBolsa.Desktop.WinUI -c Debug
+```
+
+Requires Developer Mode (see above) — without it, launch fails with
+"Developer Mode is not enabled on this machine." First run registers a
+debug package identity via the `winapp` CLI
+(`Microsoft.Windows.SDK.BuildTools.WinApp`) and launches with that
+identity; no manual MSIX install step needed.
 
 ## Environments
 

@@ -10,10 +10,12 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 0 — Repository and architecture.** Solution/project skeleton and
-docs are in place; there is no runnable UI yet. See
+**Phase 1 — Native Windows shell (in progress).** The WinUI 3 shell
+builds and packages cleanly from the CLI (no Visual Studio IDE needed),
+but running it on a given machine requires Windows Developer Mode
+enabled — see [docs/development.md](docs/development.md). See
 [docs/vision.md §17](docs/vision.md#17-phased-roadmap) for the full phase
-roadmap. Next up: **Phase 1 — Native Windows shell.**
+roadmap.
 
 ## Structure
 
@@ -21,7 +23,7 @@ roadmap. Next up: **Phase 1 — Native Windows shell.**
 docs/                       Vision, architecture, dev/deploy/sync docs, ADRs
 src/Client/MdBolsa.Core/     Domain logic, parsing, indexing (platform-agnostic)
 src/Client/MdBolsa.Data/     SQLite-backed storage (platform-agnostic)
-src/Client/MdBolsa.Desktop.WinUI/  WinUI 3 shell (placeholder — Phase 1)
+src/Client/MdBolsa.Desktop.WinUI/  WinUI 3 shell
 tests/                       Unit tests for Core and Data
 samples/dev-vault/           Fake vault used as the Development default
 config/                      `.example` templates for local config/secrets
@@ -34,10 +36,9 @@ dotnet build src/MdBolsa.sln
 dotnet test src/MdBolsa.sln
 ```
 
-Building/running the WinUI 3 shell requires Visual Studio 2022 with the
-Windows App SDK workload, starting Phase 1. See
-[docs/development.md](docs/development.md) for the full dev setup and
-branching workflow.
+Running the WinUI 3 shell (not just building it) requires Windows
+Developer Mode enabled. See [docs/development.md](docs/development.md)
+for the full dev setup and branching workflow.
 
 ## Principles
 

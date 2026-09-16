@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "MdBolsa.Desktop.WinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "MdBolsa.Desktop.WinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
