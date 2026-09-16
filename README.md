@@ -10,12 +10,11 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 1 — Native Windows shell (in progress).** The WinUI 3 shell
-builds and packages cleanly from the CLI (no Visual Studio IDE needed),
-but running it on a given machine requires Windows Developer Mode
-enabled — see [docs/development.md](docs/development.md). See
+**Phase 1 — Native Windows shell.** The WinUI 3 shell builds and runs,
+verified as a live native window (title "mdbolsa") — no Visual Studio
+IDE needed, only the .NET CLI. See
 [docs/vision.md §17](docs/vision.md#17-phased-roadmap) for the full phase
-roadmap.
+roadmap. Next up: **Phase 2 — Local Markdown vault.**
 
 ## Structure
 
@@ -37,8 +36,10 @@ dotnet test src/MdBolsa.sln
 ```
 
 Running the WinUI 3 shell (not just building it) requires Windows
-Developer Mode enabled. See [docs/development.md](docs/development.md)
-for the full dev setup and branching workflow.
+Developer Mode enabled and the `winapp` CLI (plain `dotnet run` doesn't
+register the debug package identity correctly with this preview
+tooling). See [docs/development.md](docs/development.md) for the exact
+command and the full dev setup / branching workflow.
 
 ## Principles
 

@@ -22,15 +22,23 @@ dotnet test src/MdBolsa.sln
 
 ## Run the Desktop Shell
 
+Plain `dotnet run` does **not** correctly register the debug package
+identity with this (preview) tooling and will fail with
+`REGDB_E_CLASSNOTREG`. Use the `winapp` CLI directly instead — it ships
+inside the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, not
+as an installable `dotnet tool`:
+
 ```bash
-dotnet run --project src/Client/MdBolsa.Desktop.WinUI -c Debug
+"$HOME/.nuget/packages/microsoft.windows.sdk.buildtools.winapp/<version>/tools/win-x64/winapp.exe" \
+  run src/Client/MdBolsa.Desktop.WinUI/MdBolsa.Desktop.WinUI.csproj -c Debug --arch x64 --detach
 ```
 
-Requires Developer Mode (see above) — without it, launch fails with
-"Developer Mode is not enabled on this machine." First run registers a
-debug package identity via the `winapp` CLI
-(`Microsoft.Windows.SDK.BuildTools.WinApp`) and launches with that
-identity; no manual MSIX install step needed.
+Substitute the installed `<version>` (check the folder, or the
+`Microsoft.Windows.SDK.BuildTools.WinApp` `PackageReference` version in
+`MdBolsa.Desktop.WinUI.csproj`). Requires Developer Mode (Settings →
+Privacy & security → For developers). First run also installs any
+missing Windows App Runtime MSIX packages and registers a loose-layout
+package — no manual MSIX install step needed.
 
 ## Environments
 

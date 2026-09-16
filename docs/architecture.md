@@ -115,15 +115,19 @@ SSD later is a bind-mount + data-copy operation, not a code change.
   Developer Mode** enabled (Settings → Privacy & security → For
   developers), since it launches as a debug-registered packaged app
   without a signed MSIX. See [development.md](development.md).
+- Plain `dotnet run` does not perform debug package-identity
+  registration correctly for this (preview) tooling — it launches the
+  raw `.exe` directly, which fails with `REGDB_E_CLASSNOTREG` even with
+  Developer Mode on. Use the `winapp` CLI (`Microsoft.Windows.SDK.BuildTools.WinApp`)
+  to run instead; it builds, installs any missing Windows App Runtime
+  MSIX packages, registers a loose-layout package, and launches via
+  AUMID. See [development.md](development.md) for the exact command.
 
 ## Verified Working
 
-- `dotnet build src/MdBolsa.sln` builds all five projects
-  (`MdBolsa.Core`, `MdBolsa.Data`, `MdBolsa.Desktop.WinUI`, and their
-  test projects) cleanly with only the .NET 8 SDK and Visual Studio Build
+- `dotnet build src/MdBolsa.sln` / `dotnet test src/MdBolsa.sln` pass for
+  all five projects, using only the .NET 8 SDK and Visual Studio Build
   Tools 2022 — no full Visual Studio IDE required.
-- `dotnet test src/MdBolsa.sln` passes.
-- MSIX debug-packaging (`winapp run`) succeeds through the build and
-  manifest/package-identity steps.
-- Actually launching the window is unverified on this machine pending
-  Developer Mode being enabled (see above).
+- The WinUI 3 shell actually launches: confirmed a live process with
+  `MainWindowTitle` "mdbolsa" and ~120MB working set on a Debug build
+  (2026-09-16).
