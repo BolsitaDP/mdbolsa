@@ -1,0 +1,45 @@
+# Build output
+bin/
+obj/
+out/
+publish/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# WinUI / MSIX packaging output
+AppPackages/
+BundleArtifacts/
+*.appx
+*.appxbundle
+*.appxsym
+*.appxupload
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# Test results
+TestResults/
+*.trx
+
+# Local secrets / environment overrides — never commit real values
+.env
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Local.json
+
+# Local per-device app data if ever created under the repo during dev testing
+.data-dev/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# NuGet
+*.nupkg
+.nuget/

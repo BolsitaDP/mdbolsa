@@ -1,0 +1,9 @@
+{
+  "Environment": "Development",
+  "Vault": {
+    "Path": "../samples/dev-vault"
+  },
+  "Sync": {
+    "ServerUrl": null
+  }
+}
