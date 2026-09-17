@@ -2,18 +2,34 @@ using MdBolsa.Core.Links;
 using MdBolsa.Core.Vault;
 using MdBolsa.Data.Links;
 using MdBolsa.Data.Vault;
+using Microsoft.Data.Sqlite;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace MdBolsa_Desktop_WinUI;
 
-// Phase 4: browse a vault's notes and see backlinks. Read-only by design - the Phase 3
-// editor's Save path is unverified/known to crash on this machine (see feature/editor
-// and docs/architecture.md), so this view only ever *sets* TextBlock.Text (proven safe
-// throughout that investigation) and never reads a text-input control's content back.
+// Phase 3 editor + Phase 4 backlinks: open a vault, browse its notes, edit one as plain
+// Markdown text, save it (explicitly via SaveButton, or implicitly when switching
+// notes/vaults), and see its backlinks.
+//
+// Saving used to crash natively on this machine's WindowsAppSDK 2.4.0 (preview) build -
+// reading Editor.Text back (the getter) triggered a STATUS_STOWED_EXCEPTION, reproduced
+// with a no-op TextChanged handler, a polling DispatcherQueueTimer, GetValue instead of
+// .Text, and RichEditBox.Document instead of TextBox (see docs/architecture.md's Known
+// Issues section for the full isolation notes). Normalizing line endings before writing
+// and hardening SqliteVaultIndex.Upsert against a stale path/id row (both below) is what
+// was tried next, on a theory that the "crash" was actually an uncaught SqliteException
+// getting misreported - that theory doesn't fully square with the isolation notes (which
+// include a crash with a literally empty, no-op event handler touching neither the
+// filesystem nor SQLite), but empirically, saving no longer crashes with these changes
+// in place. Root cause still not confidently identified. Verified live:
+// opening a note, typing a real edit, and clicking Save now works and round-trips
+// correctly on disk.
 public sealed partial class MainPage : Page
 {
     private string? _vaultPath;
+    private string? _currentRelativePath;
     private Dictionary<Guid, NoteMetadata> _notesById = new();
 
     public MainPage()
@@ -23,6 +39,9 @@ public sealed partial class MainPage : Page
 
     private void OnOpenVaultClicked(object sender, RoutedEventArgs e)
     {
+        SaveCurrentNote();
+        _currentRelativePath = null;
+
         var path = VaultPathBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
         {
@@ -33,6 +52,29 @@ public sealed partial class MainPage : Page
         _vaultPath = path;
         RescanAndRefreshList();
     }
+
+    private void OnNewNoteClicked(object sender, RoutedEventArgs e)
+    {
+        if (_vaultPath is null)
+        {
+            StatusText.Text = "Open a vault first.";
+            return;
+        }
+
+        var fileName = "Untitled.md";
+        var counter = 1;
+        while (File.Exists(Path.Combine(_vaultPath, fileName)))
+        {
+            counter++;
+            fileName = $"Untitled {counter}.md";
+        }
+
+        File.WriteAllText(Path.Combine(_vaultPath, fileName), "# Untitled\n");
+        RescanAndRefreshList();
+        ShowAndEditNote(fileName);
+    }
+
+    private void OnSaveClicked(object sender, RoutedEventArgs e) => SaveCurrentNote();
 
     private void RescanAndRefreshList()
     {
@@ -50,6 +92,12 @@ public sealed partial class MainPage : Page
         var notes = vaultIndex.GetAll().OrderBy(n => n.RelativePath).ToList();
         _notesById = notes.ToDictionary(n => n.Id);
 
+        // Plain Buttons in a StackPanel, not a ListView - a ListView (with or without
+        // SelectionChanged/ItemClick, with or without a handler that does anything) was
+        // never actually the problem; the Editor TextBox save path was. Kept as
+        // Buttons since they're already proven stable here and are plenty for
+        // personal-vault scale; revisit if a later phase needs virtualization for very
+        // large vaults.
         NotesList.Children.Clear();
         foreach (var note in notes)
         {
@@ -59,33 +107,52 @@ public sealed partial class MainPage : Page
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
             };
-            button.Click += (_, _) => ShowNote(note);
+            button.Click += (_, _) => ShowAndEditNote(note.RelativePath);
             NotesList.Children.Add(button);
         }
     }
 
-    private void ShowNote(NoteMetadata note)
+    private void ShowAndEditNote(string? relativePath)
     {
-        NoteTitleText.Text = note.RelativePath;
+        SaveCurrentNote();
+        _currentRelativePath = relativePath;
 
+        // The file can vanish between being listed and being opened (external delete,
+        // rename by another tool) - a real possibility for a local-first app that
+        // doesn't own exclusive access to the vault.
         string content;
         try
         {
-            content = File.ReadAllText(ResolvePath(note.RelativePath));
+            content = relativePath is null ? string.Empty : File.ReadAllText(ResolvePath(relativePath));
         }
         catch (IOException)
         {
-            NoteContentText.Text = "(could not read this note - it may have been moved or deleted)";
-            content = string.Empty;
+            EditorStatusText.Text = $"Could not open {relativePath} - it may have been moved or deleted.";
+            _currentRelativePath = null;
+            return;
         }
-        if (content.Length > 0) NoteContentText.Text = content;
 
-        var backlinkNotes = OpenLinkIndex().GetBacklinkSourceIds(note.Id)
-            .Select(id => _notesById.GetValueOrDefault(id))
-            .Where(n => n is not null)
-            .Select(n => n!)
-            .OrderBy(n => n.RelativePath)
-            .ToList();
+        EditorStatusText.Text = relativePath is null ? "Select a note to edit." : $"Editing {relativePath}";
+
+        // Deferred to the next dispatcher cycle - setting Editor.Text synchronously
+        // inline in the click/scan call stack was part of what reproduced the crash
+        // described above.
+        DispatcherQueue.TryEnqueue(() => Editor.Text = content);
+
+        ShowBacklinks(relativePath);
+    }
+
+    private void ShowBacklinks(string? relativePath)
+    {
+        var note = relativePath is null ? null : _notesById.Values.FirstOrDefault(n => n.RelativePath == relativePath);
+        var backlinkNotes = note is null
+            ? []
+            : OpenLinkIndex().GetBacklinkSourceIds(note.Id)
+                .Select(id => _notesById.GetValueOrDefault(id))
+                .Where(n => n is not null)
+                .Select(n => n!)
+                .OrderBy(n => n.RelativePath)
+                .ToList();
 
         BacklinksHeaderText.Text = backlinkNotes.Count switch
         {
@@ -103,10 +170,37 @@ public sealed partial class MainPage : Page
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
             };
-            button.Click += (_, _) => ShowNote(backlinkNote);
+            button.Click += (_, _) => ShowAndEditNote(backlinkNote.RelativePath);
             BacklinksList.Children.Add(button);
         }
     }
+
+    private void SaveCurrentNote()
+    {
+        if (_currentRelativePath is null || _vaultPath is null) return;
+
+        try
+        {
+            var text = NormalizeLineEndings(Editor.Text);
+            File.WriteAllText(ResolvePath(_currentRelativePath), text);
+
+            var vaultIndex = OpenVaultIndex();
+            new VaultScanner(_vaultPath, vaultIndex).Scan();
+            new LinkScanner(_vaultPath, vaultIndex, OpenLinkIndex()).Scan();
+
+            EditorStatusText.Text = $"Editing {_currentRelativePath} (saved {DateTime.Now:T})";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            EditorStatusText.Text = $"Could not save {_currentRelativePath}: {ex.Message}";
+        }
+    }
+
+    // WinUI's TextBox.Text getter can return CRLF-terminated lines even when the
+    // control was only ever populated with LF content, so normalize before writing -
+    // otherwise every save silently rewrites the file's line-ending style.
+    private static string NormalizeLineEndings(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n');
 
     private string ResolvePath(string relativePath) =>
         Path.Combine(_vaultPath!, relativePath.Replace('/', Path.DirectorySeparatorChar));

@@ -57,4 +57,30 @@ public class FrontMatterTests
 
         Assert.Equal(content, result);
     }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    public void TryReadId_FindsId_RegardlessOfLineEndingStyle(string newline)
+    {
+        var id = Guid.NewGuid();
+        var content = string.Join(newline, "---", $"id: {id}", "created: 2026-09-15", "---", "", "# Note", "");
+
+        Assert.Equal(id, FrontMatter.TryReadId(content));
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    public void EnsureId_IsNoOp_WhenIdAlreadyPresent_RegardlessOfLineEndingStyle(string newline)
+    {
+        var id = Guid.NewGuid();
+        var content = string.Join(newline, "---", $"id: {id}", "---", "", "Body", "");
+
+        var result = FrontMatter.EnsureId(content, Guid.NewGuid());
+
+        Assert.Equal(id, FrontMatter.TryReadId(result));
+    }
 }

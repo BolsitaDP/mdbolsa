@@ -13,7 +13,7 @@ public static partial class FrontMatter
 
     public static Guid? TryReadId(string content)
     {
-        var block = ExtractBlock(content);
+        var block = ExtractBlock(NormalizeLineEndings(content));
         if (block is null) return null;
 
         var match = IdLineRegex().Match(block);
@@ -24,13 +24,14 @@ public static partial class FrontMatter
     {
         if (TryReadId(content) is not null) return content;
 
-        if (ExtractBlock(content) is not null)
+        var normalized = NormalizeLineEndings(content);
+        if (ExtractBlock(normalized) is not null)
         {
-            var insertAt = content.IndexOf('\n') + 1;
-            return content.Insert(insertAt, $"id: {id}\n");
+            var insertAt = normalized.IndexOf('\n') + 1;
+            return normalized.Insert(insertAt, $"id: {id}\n");
         }
 
-        return $"---\nid: {id}\n---\n\n{content}";
+        return $"---\nid: {id}\n---\n\n{normalized}";
     }
 
     private static string? ExtractBlock(string content)
@@ -40,4 +41,12 @@ public static partial class FrontMatter
         var closingIndex = content.IndexOf("\n---", 3, StringComparison.Ordinal);
         return closingIndex < 0 ? null : content[3..closingIndex];
     }
+
+    // Files can arrive with LF, CRLF, or (rarely) bare CR line endings depending on
+    // their origin (a Windows editor, a WinUI TextBox getter, a file copied from
+    // elsewhere) - detection must not depend on which one a given file happens to use,
+    // or a note could get a second `id:` injected purely because of its line-ending
+    // style.
+    private static string NormalizeLineEndings(string content) =>
+        content.Replace("\r\n", "\n").Replace('\r', '\n');
 }

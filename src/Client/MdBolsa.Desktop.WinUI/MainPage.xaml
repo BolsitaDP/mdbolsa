@@ -29,9 +29,18 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0">
-                <StackPanel x:Name="NotesList" Spacing="2" />
-            </ScrollViewer>
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Button x:Name="NewNoteButton" Content="New note" Click="OnNewNoteClicked"
+                        HorizontalAlignment="Stretch" Margin="0,0,0,8" />
+                <ScrollViewer Grid.Row="1">
+                    <StackPanel x:Name="NotesList" Spacing="2" />
+                </ScrollViewer>
+            </Grid>
 
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
@@ -41,12 +50,19 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <TextBlock x:Name="NoteTitleText" FontSize="20" FontWeight="SemiBold"
-                           Text="Select a note to view it." />
-
-                <ScrollViewer Grid.Row="1" Margin="0,8,0,8">
-                    <TextBlock x:Name="NoteContentText" TextWrapping="Wrap" FontFamily="Consolas" />
-                </ScrollViewer>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="EditorStatusText" VerticalAlignment="Center" Opacity="0.7"
+                               Text="Select a note to edit." />
+                    <Button x:Name="SaveButton" Grid.Column="1" Content="Save" Click="OnSaveClicked" />
+                </Grid>
+                <TextBox x:Name="Editor" Grid.Row="1"
+                         AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas"
+                         IsSpellCheckEnabled="False"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
 
                 <TextBlock x:Name="BacklinksHeaderText" Grid.Row="2" Margin="0,8,0,4" Opacity="0.7" />
                 <ScrollViewer Grid.Row="3" MaxHeight="160">
