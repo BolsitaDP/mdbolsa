@@ -41,25 +41,44 @@ public sealed class SqliteVaultIndex : IVaultIndex
     public void Upsert(NoteMetadata note)
     {
         using var connection = OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO notes (id, path, title, content_hash, revision, created_at, updated_at)
-            VALUES ($id, $path, $title, $hash, $revision, $created, $updated)
-            ON CONFLICT(id) DO UPDATE SET
-                path = excluded.path,
-                title = excluded.title,
-                content_hash = excluded.content_hash,
-                revision = excluded.revision,
-                updated_at = excluded.updated_at
-            """;
-        command.Parameters.AddWithValue("$id", note.Id.ToString());
-        command.Parameters.AddWithValue("$path", note.RelativePath);
-        command.Parameters.AddWithValue("$title", note.Title);
-        command.Parameters.AddWithValue("$hash", note.ContentHash);
-        command.Parameters.AddWithValue("$revision", note.Revision);
-        command.Parameters.AddWithValue("$created", note.CreatedAt.ToString("O"));
-        command.Parameters.AddWithValue("$updated", note.UpdatedAt.ToString("O"));
-        command.ExecuteNonQuery();
+        using var transaction = connection.BeginTransaction();
+
+        // A stale row can be left at this path under a different id (e.g. an older
+        // scan indexed this path before the file's id was assigned/changed) - the
+        // unique index on path would otherwise reject the insert/update below.
+        using (var deleteStale = connection.CreateCommand())
+        {
+            deleteStale.Transaction = transaction;
+            deleteStale.CommandText = "DELETE FROM notes WHERE path = $path AND id <> $id";
+            deleteStale.Parameters.AddWithValue("$path", note.RelativePath);
+            deleteStale.Parameters.AddWithValue("$id", note.Id.ToString());
+            deleteStale.ExecuteNonQuery();
+        }
+
+        using (var upsert = connection.CreateCommand())
+        {
+            upsert.Transaction = transaction;
+            upsert.CommandText = """
+                INSERT INTO notes (id, path, title, content_hash, revision, created_at, updated_at)
+                VALUES ($id, $path, $title, $hash, $revision, $created, $updated)
+                ON CONFLICT(id) DO UPDATE SET
+                    path = excluded.path,
+                    title = excluded.title,
+                    content_hash = excluded.content_hash,
+                    revision = excluded.revision,
+                    updated_at = excluded.updated_at
+                """;
+            upsert.Parameters.AddWithValue("$id", note.Id.ToString());
+            upsert.Parameters.AddWithValue("$path", note.RelativePath);
+            upsert.Parameters.AddWithValue("$title", note.Title);
+            upsert.Parameters.AddWithValue("$hash", note.ContentHash);
+            upsert.Parameters.AddWithValue("$revision", note.Revision);
+            upsert.Parameters.AddWithValue("$created", note.CreatedAt.ToString("O"));
+            upsert.Parameters.AddWithValue("$updated", note.UpdatedAt.ToString("O"));
+            upsert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
     }
 
     public int DeleteMissing(IReadOnlyCollection<Guid> idsStillPresent)

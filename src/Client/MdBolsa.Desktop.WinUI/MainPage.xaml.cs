@@ -1,5 +1,6 @@
 using MdBolsa.Core.Vault;
 using MdBolsa.Data.Vault;
+using Microsoft.Data.Sqlite;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -98,10 +99,24 @@ public sealed partial class MainPage : Page
     {
         if (_currentRelativePath is null || _vaultPath is null) return;
 
-        File.WriteAllText(ResolvePath(_currentRelativePath), Editor.Text);
-        new VaultScanner(_vaultPath, OpenIndex()).Scan();
-        EditorStatusText.Text = $"Editing {_currentRelativePath} (saved {DateTime.Now:T})";
+        try
+        {
+            var text = NormalizeLineEndings(Editor.Text);
+            File.WriteAllText(ResolvePath(_currentRelativePath), text);
+            new VaultScanner(_vaultPath, OpenIndex()).Scan();
+            EditorStatusText.Text = $"Editing {_currentRelativePath} (saved {DateTime.Now:T})";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            EditorStatusText.Text = $"Could not save {_currentRelativePath}: {ex.Message}";
+        }
     }
+
+    // WinUI's TextBox.Text getter can return CRLF-terminated lines even when the
+    // control was only ever populated with LF content, so normalize before writing -
+    // otherwise every save silently rewrites the file's line-ending style.
+    private static string NormalizeLineEndings(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n');
 
     private void RescanAndRefreshList()
     {

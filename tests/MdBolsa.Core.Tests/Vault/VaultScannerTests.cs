@@ -78,6 +78,43 @@ public class VaultScannerTests : IDisposable
     }
 
     [Fact]
+    public void Scan_WithCarriageReturnLineEndings_DoesNotReassignId()
+    {
+        var id = Guid.NewGuid();
+        var content = $"---\rid: {id}\r---\r\r# Note\r";
+        var path = Path.Combine(_root, "Note.md");
+        File.WriteAllText(path, content);
+        var index = new InMemoryVaultIndex();
+
+        new VaultScanner(_root, index).Scan();
+
+        var note = Assert.Single(index.GetAll());
+        Assert.Equal(id, note.Id);
+        Assert.Equal(content, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void Scan_RepeatedSavesWithVaryingLineEndings_KeepExactlyOneId()
+    {
+        var path = Path.Combine(_root, "Note.md");
+        File.WriteAllText(path, "# Note\n");
+        var index = new InMemoryVaultIndex();
+        var scanner = new VaultScanner(_root, index);
+        scanner.Scan();
+        var id = index.GetAll().Single().Id;
+
+        File.WriteAllText(path, $"---\nid: {id}\n---\n\n# Note\nEdited once.\n");
+        scanner.Scan();
+        File.WriteAllText(path, $"---\r\nid: {id}\r\n---\r\n\r\n# Note\r\nEdited twice.\r\n");
+        scanner.Scan();
+
+        var note = Assert.Single(index.GetAll());
+        Assert.Equal(id, note.Id);
+        var idOccurrences = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(path), "id:").Count;
+        Assert.Equal(1, idOccurrences);
+    }
+
+    [Fact]
     public void Scan_RemovesDeletedFiles_FromIndex()
     {
         var path = Path.Combine(_root, "Note.md");

@@ -53,6 +53,22 @@ public class SqliteVaultIndexTests : IDisposable
     }
 
     [Fact]
+    public void Upsert_SamePathDifferentId_ReplacesStaleRow_WithoutThrowing()
+    {
+        var index = new SqliteVaultIndex(_dbPath);
+        var oldId = Guid.NewGuid();
+        var newId = Guid.NewGuid();
+        index.Upsert(new NoteMetadata(oldId, "Note.md", "Note", "h1", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+
+        var exception = Record.Exception(() => index.Upsert(
+            new NoteMetadata(newId, "Note.md", "Note", "h2", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+
+        Assert.Null(exception);
+        var note = Assert.Single(index.GetAll());
+        Assert.Equal(newId, note.Id);
+    }
+
+    [Fact]
     public void DeleteMissing_RemovesNotesNotInSet()
     {
         var index = new SqliteVaultIndex(_dbPath);
