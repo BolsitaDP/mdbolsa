@@ -144,6 +144,24 @@ Concretely:
   what displays it, with the backlinks panel underneath, refreshed on
   every note switch.
 
+## Search (Phase 5)
+
+- `MdBolsa.Core.Search`: `SearchResult`, `ISearchIndex` (storage
+  interface), `SearchScanner` (reindexes every note's title + body,
+  stripped of frontmatter via `FrontMatter.Body`, on every scan).
+- `MdBolsa.Data.Search.SqliteSearchIndex` implements `ISearchIndex`
+  against a `notes_fts` **FTS5 virtual table** - SQLite's built-in
+  full-text search, bundled with the SQLite native library already in
+  use, so no new NuGet dependency. See
+  [0007-search-with-fts5](decisions/0007-search-with-fts5.md) for why,
+  and for the query-sanitization approach (a search box never sees raw
+  FTS5 query syntax - each term becomes a quoted, ANDed phrase).
+- The WinUI shell adds a search box + "Search"/"Show all notes"
+  buttons above the notes list; a search result replaces the list with
+  matching notes (title + snippet), each still clickable to open.
+  Deliberately button-triggered, not `TextChanged`-driven - see the
+  `MainPage` class comment.
+
 ## Known Issues (Resolved)
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
@@ -219,4 +237,9 @@ Concretely:
   a note → see its backlinks → type an edit adding a new `[[link]]` →
   Save → no crash → file round-trips correctly on disk → the new
   link's backlink appears, correctly deduplicated, on the target note.
-  39 tests pass (30 Core, 9 Data).
+- Phase 5 (search) verified live: searching a term only in a note's
+  frontmatter correctly returns zero results (frontmatter is excluded
+  by design); searching a term in a note's body returns it with a
+  correct snippet; clicking a result opens that note in the editor;
+  "Show all notes" correctly resets the list.
+- 51 tests pass (34 Core, 17 Data).
