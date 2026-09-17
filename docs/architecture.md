@@ -119,9 +119,54 @@ Concretely:
   Markdig/YamlDotNet/DI are still deferred until Phase 3+ actually needs
   them (see Dependencies table above).
 - The WinUI shell exercises this for real: a text box for a vault path
-  plus a "Rescan vault" button that runs `VaultScanner` against
-  `SqliteVaultIndex` and lists what it found — a smoke test, not the
-  editor (Phase 3).
+  plus an "Open vault" button that runs `VaultScanner` against
+  `SqliteVaultIndex` and lists what it found.
+
+## Wiki Links & Backlinks (Phase 4)
+
+- `MdBolsa.Core.Links`: `NoteLink`, `ILinkIndex` (storage interface),
+  `WikiLinkParser` (regex-based `[[Target]]` / `[[Target|Display]]` /
+  `[[Target#Heading]]` extraction — no Markdig yet; nothing else about a
+  note's Markdown structure matters for this), and `LinkScanner` (reads
+  every indexed note, extracts targets, resolves them against the
+  current vault, and replaces that note's link rows). Resolution rule:
+  see [0006-wiki-link-resolution](decisions/0006-wiki-link-resolution.md).
+- `MdBolsa.Data.Links.SqliteLinkIndex` implements `ILinkIndex` against a
+  `links` table (`source_note_id`, `target_text`,
+  `target_note_id` nullable — unresolved links are kept, not dropped, so
+  they can eventually be shown as "broken"). Same `CREATE TABLE IF NOT
+  EXISTS` approach as `notes`, same SQLite file.
+- `LinkScanner` runs after `VaultScanner` in the WinUI shell (it needs
+  the current note set to resolve targets against) - both are driven
+  from the same "Open vault" action.
+- The WinUI shell exercises this as a **read-only note viewer**:
+  clicking a note in the list shows its raw content and its backlinks
+  (also clickable, to navigate). Deliberately does not reuse the Phase 3
+  editor's `TextBox` - see Known Issues below for why. Every control
+  this view touches only ever has its `.Text` *set*, never read back.
+
+## Known Issues
+
+- **WinUI 3 `TextBox.Text` getter crashes the process natively**, on
+  this machine's WindowsAppSDK 2.4.0 (preview) build, when reading back
+  text that was set programmatically. Confirmed via Windows Event Log:
+  `STATUS_STOWED_EXCEPTION` (`0xc000027b`), faulting module varies
+  (`Microsoft.UI.Xaml.dll`, `combase.dll`, `CoreMessagingXP.dll` seen
+  across different runs) - not a catchable .NET exception, so
+  `try/catch` around the call site does not help. Reproduced with: a
+  no-op `TextChanged` handler, a polling `DispatcherQueueTimer`,
+  `GetValue(TextBox.TextProperty)` instead of `.Text`, and
+  `RichEditBox.Document.GetText` instead of `TextBox`. Setting `.Text`
+  (to *display* content) is fine when deferred via
+  `DispatcherQueue.TryEnqueue`; only reading it back is broken. Root
+  cause not identified. The Phase 3 editor branch (`feature/editor`) is
+  blocked on this - do not build another feature on top of "read a
+  TextBox's edited content back" until this is resolved or a newer
+  non-preview Windows App SDK release is available to test against.
+  Every other control used elsewhere in the app (`Button`, `TextBlock`,
+  a `StackPanel` of dynamically created `Button`s) has been extensively
+  exercised with no issues - this is specific to reading text-input
+  control content back in code, not a general WinUI instability.
 
 ## WinUI Project Notes (Phase 1)
 
@@ -162,3 +207,9 @@ Concretely:
 - The WinUI 3 shell actually launches: confirmed a live process with
   `MainWindowTitle` "mdbolsa" and ~120MB working set on a Debug build
   (2026-09-16).
+- Phase 4 (wiki links/backlinks): verified via `dotnet test` only (30
+  tests) as of this commit — not yet re-confirmed live in the running
+  shell. The controls it uses (`Button`, `TextBlock.Text` set-only) were
+  each independently exercised many times during the Phase 3
+  investigation without issue, but this specific screen hasn't been
+  launched and clicked through yet.
