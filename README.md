@@ -10,13 +10,15 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 2 — Local Markdown vault.** The vault scanner assigns each note
-a stable id (frontmatter), indexes it into SQLite, and detects
-adds/edits/renames/deletes on rescan — verified live end to end
-(scan → index → rescan is idempotent) via the WinUI shell's vault path
-box and "Rescan vault" button. See
+**Phase 4 — Wiki links and backlinks.** The WinUI shell is a read-only
+vault/note browser: open a vault, click a note to see its content and
+its backlinks (also clickable). Phase 3's editor (typing + saving) is
+**blocked** on `feature/editor` by an unresolved WindowsAppSDK 2.4.0
+crash reading a `TextBox`'s edited content back — see the Known Issues
+section in [docs/architecture.md](docs/architecture.md) before touching
+that branch. This branch deliberately stays read-only to avoid it. See
 [docs/vision.md §17](docs/vision.md#17-phased-roadmap) for the full phase
-roadmap. Next up: **Phase 3 — Editor.**
+roadmap.
 
 ## Structure
 
@@ -41,9 +43,10 @@ Running the WinUI 3 shell (not just building it) requires Windows
 Developer Mode enabled and the `winapp` CLI (plain `dotnet run` doesn't
 register the debug package identity correctly with this preview
 tooling). Once it's running, type a vault folder path (e.g.
-`samples/dev-vault`, as an absolute path) into the text box and click
-"Rescan vault". See [docs/development.md](docs/development.md) for the
-exact run command and the full dev setup / branching workflow.
+`samples/dev-vault`, as an absolute path) into the text box, click
+"Open vault", then click a note to view it and its backlinks. See
+[docs/development.md](docs/development.md) for the exact run command
+and the full dev setup / branching workflow.
 
 ## Principles
 

@@ -17,12 +17,42 @@
 
         <StackPanel Orientation="Horizontal" Spacing="12">
             <TextBox x:Name="VaultPathBox" Width="500" PlaceholderText="Vault folder path" />
-            <Button x:Name="RescanButton" Content="Rescan vault" Click="OnRescanClicked" />
+            <Button x:Name="OpenVaultButton" Content="Open vault" Click="OnOpenVaultClicked" />
         </StackPanel>
 
         <TextBlock x:Name="StatusText" Grid.Row="1" Margin="0,8,0,8" Opacity="0.7"
-                   Text="Enter a vault folder path above, then click Rescan." />
+                   Text="Enter a vault folder path above, then click Open vault." />
 
-        <ListView x:Name="NotesList" Grid.Row="2" />
+        <Grid Grid.Row="2" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0">
+                <StackPanel x:Name="NotesList" Spacing="2" />
+            </ScrollViewer>
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="NoteTitleText" FontSize="20" FontWeight="SemiBold"
+                           Text="Select a note to view it." />
+
+                <ScrollViewer Grid.Row="1" Margin="0,8,0,8">
+                    <TextBlock x:Name="NoteContentText" TextWrapping="Wrap" FontFamily="Consolas" />
+                </ScrollViewer>
+
+                <TextBlock x:Name="BacklinksHeaderText" Grid.Row="2" Margin="0,8,0,4" Opacity="0.7" />
+                <ScrollViewer Grid.Row="3" MaxHeight="160">
+                    <StackPanel x:Name="BacklinksList" Spacing="2" />
+                </ScrollViewer>
+            </Grid>
+        </Grid>
     </Grid>
 </Page>
