@@ -83,4 +83,20 @@ public class FrontMatterTests
 
         Assert.Equal(id, FrontMatter.TryReadId(result));
     }
+
+    [Fact]
+    public void Body_ReturnsContentAfterFrontMatter()
+    {
+        var content = "---\nid: abc\n---\n\n# Note\nBody text.\n";
+
+        Assert.Equal("# Note\nBody text.\n", FrontMatter.Body(content));
+    }
+
+    [Fact]
+    public void Body_ReturnsWholeContent_WhenNoFrontMatter()
+    {
+        var content = "# Note\nBody text.\n";
+
+        Assert.Equal(content, FrontMatter.Body(content));
+    }
 }

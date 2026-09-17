@@ -34,6 +34,20 @@ public static partial class FrontMatter
         return $"---\nid: {id}\n---\n\n{normalized}";
     }
 
+    // Returns the note's content with any leading frontmatter block removed, so
+    // callers that care about the actual prose (search indexing, previews) don't match
+    // on id/tags/etc. noise.
+    public static string Body(string content)
+    {
+        var normalized = NormalizeLineEndings(content);
+        if (!normalized.StartsWith("---", StringComparison.Ordinal)) return normalized;
+
+        var closingIndex = normalized.IndexOf("\n---", 3, StringComparison.Ordinal);
+        if (closingIndex < 0) return normalized;
+
+        return normalized[(closingIndex + "\n---".Length)..].TrimStart('\n');
+    }
+
     private static string? ExtractBlock(string content)
     {
         if (!content.StartsWith("---", StringComparison.Ordinal)) return null;
