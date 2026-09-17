@@ -139,34 +139,41 @@ Concretely:
 - `LinkScanner` runs after `VaultScanner` in the WinUI shell (it needs
   the current note set to resolve targets against) - both are driven
   from the same "Open vault" action.
-- The WinUI shell exercises this as a **read-only note viewer**:
-  clicking a note in the list shows its raw content and its backlinks
-  (also clickable, to navigate). Deliberately does not reuse the Phase 3
-  editor's `TextBox` - see Known Issues below for why. Every control
-  this view touches only ever has its `.Text` *set*, never read back.
+- The WinUI shell now combines this with the (unblocked, see below)
+  Phase 3 editor: the same `Editor` `TextBox` used to type a note is
+  what displays it, with the backlinks panel underneath, refreshed on
+  every note switch.
 
-## Known Issues
+## Known Issues (Resolved)
 
-- **WinUI 3 `TextBox.Text` getter crashes the process natively**, on
+- **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
   this machine's WindowsAppSDK 2.4.0 (preview) build, when reading back
   text that was set programmatically. Confirmed via Windows Event Log:
-  `STATUS_STOWED_EXCEPTION` (`0xc000027b`), faulting module varies
+  `STATUS_STOWED_EXCEPTION` (`0xc000027b`), faulting module varied
   (`Microsoft.UI.Xaml.dll`, `combase.dll`, `CoreMessagingXP.dll` seen
   across different runs) - not a catchable .NET exception, so
-  `try/catch` around the call site does not help. Reproduced with: a
+  `try/catch` around the call site did not help. Reproduced with: a
   no-op `TextChanged` handler, a polling `DispatcherQueueTimer`,
   `GetValue(TextBox.TextProperty)` instead of `.Text`, and
-  `RichEditBox.Document.GetText` instead of `TextBox`. Setting `.Text`
-  (to *display* content) is fine when deferred via
-  `DispatcherQueue.TryEnqueue`; only reading it back is broken. Root
-  cause not identified. The Phase 3 editor branch (`feature/editor`) is
-  blocked on this - do not build another feature on top of "read a
-  TextBox's edited content back" until this is resolved or a newer
-  non-preview Windows App SDK release is available to test against.
-  Every other control used elsewhere in the app (`Button`, `TextBlock`,
-  a `StackPanel` of dynamically created `Button`s) has been extensively
-  exercised with no issues - this is specific to reading text-input
-  control content back in code, not a general WinUI instability.
+  `RichEditBox.Document.GetText` instead of `TextBox`, including with a
+  literally empty event handler touching neither the filesystem nor
+  SQLite.
+  **What made it stop reproducing:** normalizing CRLF/CR to LF before
+  writing `Editor.Text` to disk, and making `SqliteVaultIndex.Upsert`
+  tolerant of a stale row at the same path under a different id (both in
+  `MainPage.SaveCurrentNote` / `SqliteVaultIndex.cs`). This was applied
+  on a theory that the "crash" was actually an uncaught
+  `SqliteException` from a path/id unique-constraint violation getting
+  misreported as a native fault - that theory doesn't fully square with
+  the empty-handler reproduction above, so **the root cause is not
+  confidently identified**, but saving has since been verified live
+  and repeatedly (open a note, type a real edit including adding a new
+  `[[wiki link]]`, click Save) with no crash and correct round-tripping
+  on disk (single `id:`, LF line endings, new link resolved and
+  deduplicated in backlinks). If this resurfaces, the isolation notes
+  above are the starting point, and reverting to a read-only viewer
+  (`TextBlock.Text` set-only, never read back - proven completely
+  stable throughout this investigation) is the known-safe fallback.
 
 ## WinUI Project Notes (Phase 1)
 
@@ -207,9 +214,9 @@ Concretely:
 - The WinUI 3 shell actually launches: confirmed a live process with
   `MainWindowTitle` "mdbolsa" and ~120MB working set on a Debug build
   (2026-09-16).
-- Phase 4 (wiki links/backlinks): verified via `dotnet test` only (30
-  tests) as of this commit — not yet re-confirmed live in the running
-  shell. The controls it uses (`Button`, `TextBlock.Text` set-only) were
-  each independently exercised many times during the Phase 3
-  investigation without issue, but this specific screen hasn't been
-  launched and clicked through yet.
+- Phase 4 (wiki links/backlinks) and the Phase 3 editor's save path are
+  both verified live, together, in the merged shell: open vault → open
+  a note → see its backlinks → type an edit adding a new `[[link]]` →
+  Save → no crash → file round-trips correctly on disk → the new
+  link's backlink appears, correctly deduplicated, on the target note.
+  39 tests pass (30 Core, 9 Data).

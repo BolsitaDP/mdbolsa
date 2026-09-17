@@ -10,13 +10,13 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 4 — Wiki links and backlinks.** The WinUI shell is a read-only
-vault/note browser: open a vault, click a note to see its content and
-its backlinks (also clickable). Phase 3's editor (typing + saving) is
-**blocked** on `feature/editor` by an unresolved WindowsAppSDK 2.4.0
-crash reading a `TextBox`'s edited content back — see the Known Issues
-section in [docs/architecture.md](docs/architecture.md) before touching
-that branch. This branch deliberately stays read-only to avoid it. See
+**Phase 4 — Wiki links and backlinks.** The WinUI shell opens a vault,
+lists its notes, and lets you open, edit, and save one as plain
+Markdown text while seeing its backlinks update alongside it. Phase 3's
+editor (typing + saving) was blocked for a while by a WindowsAppSDK
+2.4.0 crash reading a `TextBox`'s edited content back — resolved (see
+docs/architecture.md's Known Issues section for what fixed it and what's
+still not fully understood about why). See
 [docs/vision.md §17](docs/vision.md#17-phased-roadmap) for the full phase
 roadmap.
 
@@ -44,9 +44,9 @@ Developer Mode enabled and the `winapp` CLI (plain `dotnet run` doesn't
 register the debug package identity correctly with this preview
 tooling). Once it's running, type a vault folder path (e.g.
 `samples/dev-vault`, as an absolute path) into the text box, click
-"Open vault", then click a note to view it and its backlinks. See
-[docs/development.md](docs/development.md) for the exact run command
-and the full dev setup / branching workflow.
+"Open vault", then click a note to view/edit it and see its backlinks.
+See [docs/development.md](docs/development.md) for the exact run
+command and the full dev setup / branching workflow.
 
 ## Principles
 
