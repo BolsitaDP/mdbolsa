@@ -162,6 +162,53 @@ Concretely:
   Deliberately button-triggered, not `TextChanged`-driven - see the
   `MainPage` class comment.
 
+## Tags & Metadata (Phase 6)
+
+- `MdBolsa.Core.Tags`: `TagCount`, `ITagIndex` (storage interface),
+  `TagParser` (frontmatter `tags:` — flow, scalar and block-sequence forms —
+  plus inline `#hashtags`, with headings/code/URL fragments explicitly excluded;
+  no Markdig), and `TagScanner` (reindexes every note's tags on every scan and
+  replaces each note's rows wholesale, like `LinkScanner`/`SearchScanner`).
+  Rules and normalization: see
+  [0008-tags-and-metadata](decisions/0008-tags-and-metadata.md).
+- `MdBolsa.Data.Tags.SqliteTagIndex` implements `ITagIndex` against a
+  `note_tags (note_id, tag)` table — deliberately no separate tag table, so a
+  tag can't outlive the last note using it; per-tag counts are a `GROUP BY`.
+  Same `CREATE TABLE IF NOT EXISTS` approach, same SQLite file as every other
+  index.
+- `FrontMatter` gained two read-only members for this phase: `TryReadBlock`
+  (the raw block, so `TagParser` can read `tags:` lines) and `ReadFields`
+  (top-level `key: value` pairs, for display). It still has exactly one write
+  path — injecting `id:` — so the app still never rewrites YAML it doesn't own.
+- The WinUI shell adds a tag panel above the notes list: every tag in the
+  vault with its note count, click to filter the notes list, click again to
+  clear. A read-only metadata line under the editor shows the note's path,
+  revision, timestamps, its tags, and any other top-level frontmatter fields.
+  Both are click-driven, never `TextChanged`-driven — see the `MainPage` class
+  comment.
+
+## Knowledge Graph (Phase 7)
+
+- `MdBolsa.Core.Graph`: `GraphNode`/`GraphEdge`/`GraphModel` (pure data - no
+  coordinates, no colours), `GraphBuilder` (derives the whole graph from the
+  notes/links/tags indexes, and the note-local graph as a breadth-first
+  expansion over that same graph), and `GraphLayout` (deterministic
+  Fruchterman-Reingold force-directed layout, no RNG, in Core so it's testable
+  and reusable by future clients). Rules: see
+  [0009-local-graph](decisions/0009-local-graph.md).
+- No new table, no new scanner and no new dependency: the graph is a derived
+  view of the three indexes the other features already read. Unresolved links
+  are carried as a count rather than drawn as nodes, and self-links are skipped.
+- The WinUI shell adds a second page, `GraphPage`, reachable from a "Graph"
+  button: whole-vault or note-local scope, a center note and depth selector,
+  nodes as `Ellipse`s / edges as `Line`s on a `Canvas`, drag to pan, buttons to
+  zoom, click a node to see what it is and re-center on it. The graph is laid
+  out in a fixed 1000x800 virtual space and mapped into the window by a
+  scale/translate `RenderTransform`, so resizing doesn't relayout.
+- The vault path, the SQLite index factories and the last-opened note moved into
+  a small static `AppSession` shared by the two pages. Deliberately not a DI
+  container - see the dependency table above.
+
 ## Known Issues (Resolved)
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
@@ -242,4 +289,9 @@ Concretely:
   by design); searching a term in a note's body returns it with a
   correct snippet; clicking a result opens that note in the editor;
   "Show all notes" correctly resets the list.
-- 51 tests pass (34 Core, 17 Data).
+- Phase 6 (tags/metadata) is covered by tests only so far — the tag panel and
+  metadata line have not yet been exercised in a live shell run.
+- Phase 7 (graph) is covered by tests only so far: the builder and the layout
+  algorithm are unit-tested, but nothing has rendered a graph in a live shell
+  run yet.
+- 114 tests pass (89 Core, 25 Data).

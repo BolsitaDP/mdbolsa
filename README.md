@@ -10,14 +10,17 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 5 — Search.** The WinUI shell opens a vault, lists its notes,
-lets you open/edit/save one as plain Markdown text while seeing its
-backlinks, and now search across the whole vault's titles and bodies
-(SQLite FTS5 — no new dependency). Phase 3's editor (typing + saving)
-was blocked for a while by a WindowsAppSDK 2.4.0 crash reading a
-`TextBox`'s edited content back — resolved (see docs/architecture.md's
-Known Issues section for what fixed it and what's still not fully
-understood about why). See
+**Phase 7 — Knowledge graph.** The WinUI shell opens a vault, lists its
+notes, lets you open/edit/save one as plain Markdown text while seeing its
+backlinks, searches the whole vault (SQLite FTS5 — no new dependency), reads
+tags from both frontmatter (`tags:`) and inline `#hashtags` into a tag panel —
+click a tag to filter the notes list — shows a read-only line with the note's own
+metadata, and now has a graph view: whole-vault or note-local, with a
+force-directed layout computed in Core and drawn as circles and lines (drag to
+pan, click a node to inspect it). Phase 3's editor (typing + saving) was blocked
+for a while by a WindowsAppSDK 2.4.0 crash reading a `TextBox`'s edited content
+back — resolved (see docs/architecture.md's Known Issues section for what fixed
+it and what's still not fully understood about why). See
 [docs/vision.md §17](docs/vision.md#17-phased-roadmap) for the full phase
 roadmap.
 
@@ -46,8 +49,10 @@ register the debug package identity correctly with this preview
 tooling). Once it's running, type a vault folder path (e.g.
 `samples/dev-vault`, as an absolute path) into the text box, click
 "Open vault", then either click a note to view/edit it and see its
-backlinks, or type into the search box and click "Search" ("Show all
-notes" clears back to the full list). See
+backlinks, click a tag in the panel to filter the list by it, type
+into the search box and click "Search" ("Show all notes" clears back
+to the full list), or click "Graph" for the knowledge-graph view.
+See
 [docs/development.md](docs/development.md) for the exact run command
 and the full dev setup / branching workflow.
 

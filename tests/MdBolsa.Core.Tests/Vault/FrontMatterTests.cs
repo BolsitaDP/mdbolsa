@@ -99,4 +99,47 @@ public class FrontMatterTests
 
         Assert.Equal(content, FrontMatter.Body(content));
     }
+
+    [Fact]
+    public void TryReadBlock_ReturnsRawBlock_OrNull()
+    {
+        var content = "---\nid: abc\ntags: [x]\n---\n\n# Note\n";
+
+        Assert.Equal("\nid: abc\ntags: [x]", FrontMatter.TryReadBlock(content));
+        Assert.Null(FrontMatter.TryReadBlock("# Note\n"));
+    }
+
+    [Fact]
+    public void ReadFields_ReturnsTopLevelScalarFields()
+    {
+        var content = "---\nid: abc\ncreated: 2026-09-15\nstatus: \"in progress\"\n---\n\n# Note\n";
+
+        var fields = FrontMatter.ReadFields(content);
+
+        Assert.Equal(3, fields.Count);
+        Assert.Equal(new MetadataField("id", "abc"), fields[0]);
+        Assert.Equal(new MetadataField("created", "2026-09-15"), fields[1]);
+        Assert.Equal(new MetadataField("status", "in progress"), fields[2]);
+    }
+
+    [Fact]
+    public void ReadFields_SkipsNestedLinesAndBlockSequences()
+    {
+        var content = "---\ntags:\n  - one\n  - two\nnested:\n  key: value\n---\n\n# Note\n";
+
+        // Only the two top-level keys survive; their values live on the indented
+        // lines below them, which this deliberately shallow reader doesn't follow,
+        // so they come back empty rather than guessed at.
+        var fields = FrontMatter.ReadFields(content);
+
+        Assert.Equal(2, fields.Count);
+        Assert.Equal(new MetadataField("tags", string.Empty), fields[0]);
+        Assert.Equal(new MetadataField("nested", string.Empty), fields[1]);
+    }
+
+    [Fact]
+    public void ReadFields_ReturnsNothing_WhenNoFrontMatter()
+    {
+        Assert.Empty(FrontMatter.ReadFields("# Note\nkey: value\n"));
+    }
 }

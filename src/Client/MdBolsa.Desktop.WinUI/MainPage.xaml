@@ -19,6 +19,7 @@
         <StackPanel Orientation="Horizontal" Spacing="12">
             <TextBox x:Name="VaultPathBox" Width="500" PlaceholderText="Vault folder path" />
             <Button x:Name="OpenVaultButton" Content="Open vault" Click="OnOpenVaultClicked" />
+            <Button x:Name="GraphButton" Content="Graph" Click="OnGraphClicked" />
         </StackPanel>
 
         <TextBlock x:Name="StatusText" Grid.Row="1" Margin="0,8,0,8" Opacity="0.7"
@@ -39,12 +40,25 @@
             <Grid Grid.Column="0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <Button x:Name="NewNoteButton" Content="New note" Click="OnNewNoteClicked"
                         HorizontalAlignment="Stretch" Margin="0,0,0,8" />
-                <ScrollViewer Grid.Row="1">
+
+                <Grid Grid.Row="1" Margin="0,0,0,8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="TagsHeaderText" Opacity="0.7" Text="No tags yet." />
+                    <ScrollViewer Grid.Row="1" MaxHeight="140" Margin="0,4,0,0">
+                        <StackPanel x:Name="TagsList" Spacing="2" />
+                    </ScrollViewer>
+                </Grid>
+
+                <ScrollViewer Grid.Row="2">
                     <StackPanel x:Name="NotesList" Spacing="2" />
                 </ScrollViewer>
             </Grid>
@@ -53,6 +67,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
@@ -71,8 +86,11 @@
                          IsSpellCheckEnabled="False"
                          ScrollViewer.VerticalScrollBarVisibility="Auto" />
 
-                <TextBlock x:Name="BacklinksHeaderText" Grid.Row="2" Margin="0,8,0,4" Opacity="0.7" />
-                <ScrollViewer Grid.Row="3" MaxHeight="160">
+                <TextBlock x:Name="NoteMetadataText" Grid.Row="2" Margin="0,8,0,4" Opacity="0.7"
+                           TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
+
+                <TextBlock x:Name="BacklinksHeaderText" Grid.Row="3" Margin="0,8,0,4" Opacity="0.7" />
+                <ScrollViewer Grid.Row="4" MaxHeight="160">
                     <StackPanel x:Name="BacklinksList" Spacing="2" />
                 </ScrollViewer>
             </Grid>

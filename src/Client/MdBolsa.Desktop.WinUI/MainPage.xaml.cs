@@ -1,9 +1,7 @@
 using MdBolsa.Core.Links;
 using MdBolsa.Core.Search;
+using MdBolsa.Core.Tags;
 using MdBolsa.Core.Vault;
-using MdBolsa.Data.Links;
-using MdBolsa.Data.Search;
-using MdBolsa.Data.Vault;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -11,9 +9,10 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace MdBolsa_Desktop_WinUI;
 
-// Phase 3 editor + Phase 4 backlinks + Phase 5 search: open a vault, browse or search
-// its notes, edit one as plain Markdown text, save it (explicitly via SaveButton, or
-// implicitly when switching notes/vaults), and see its backlinks.
+// Phase 3 editor + Phase 4 backlinks + Phase 5 search + Phase 6 tags/metadata:
+// open a vault, browse, search or filter its notes by tag, edit one as plain
+// Markdown text, save it (explicitly via SaveButton, or implicitly when
+// switching notes/vaults), and see its tags, metadata and backlinks.
 //
 // Saving used to crash natively on this machine's WindowsAppSDK 2.4.0 (preview) build -
 // reading Editor.Text back (the getter) triggered a STATUS_STOWED_EXCEPTION, reproduced
@@ -32,10 +31,15 @@ namespace MdBolsa_Desktop_WinUI;
 // every other action here, rather than a TextChanged-driven update - staying well away
 // from anything resembling the pattern implicated above, even though TextChanged itself
 // was never conclusively proven to be the (sole) cause.
+//
+// Phase 6 follows the same rule for the tag panel: clicking a tag button filters the
+// notes list, clicking the same tag again clears it. Tag filtering and search are
+// mutually exclusive views of the notes list (searching clears an active tag filter and
+// says so) rather than a combined query, which keeps the state machine to one variable.
 public sealed partial class MainPage : Page
 {
-    private string? _vaultPath;
     private string? _currentRelativePath;
+    private string? _activeTag;
     private Dictionary<Guid, NoteMetadata> _notesById = new();
 
     public MainPage()
@@ -47,6 +51,7 @@ public sealed partial class MainPage : Page
     {
         SaveCurrentNote();
         _currentRelativePath = null;
+        _activeTag = null;
 
         var path = VaultPathBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
@@ -55,13 +60,13 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        _vaultPath = path;
+        AppSession.VaultPath = path;
         RescanAndRefreshList();
     }
 
     private void OnNewNoteClicked(object sender, RoutedEventArgs e)
     {
-        if (_vaultPath is null)
+        if (AppSession.VaultPath is null)
         {
             StatusText.Text = "Open a vault first.";
             return;
@@ -69,36 +74,58 @@ public sealed partial class MainPage : Page
 
         var fileName = "Untitled.md";
         var counter = 1;
-        while (File.Exists(Path.Combine(_vaultPath, fileName)))
+        while (File.Exists(Path.Combine(AppSession.VaultPath, fileName)))
         {
             counter++;
             fileName = $"Untitled {counter}.md";
         }
 
-        File.WriteAllText(Path.Combine(_vaultPath, fileName), "# Untitled\n");
+        File.WriteAllText(Path.Combine(AppSession.VaultPath, fileName), "# Untitled\n");
         RescanAndRefreshList();
         ShowAndEditNote(fileName);
     }
 
     private void OnSaveClicked(object sender, RoutedEventArgs e) => SaveCurrentNote();
 
-    private void OnSearchClicked(object sender, RoutedEventArgs e)
+    // Phase 7's graph view is a second page rather than another panel here: it's
+    // a different view of the same indexes, and MainPage is already dense. The
+    // save happens first so the graph reads fresh indexes, not pre-edit ones.
+    private void OnGraphClicked(object sender, RoutedEventArgs e)
     {
-        if (_vaultPath is null)
+        if (AppSession.VaultPath is null)
         {
             StatusText.Text = "Open a vault first.";
             return;
         }
 
-        var query = SearchBox.Text.Trim();
-        if (query.Length == 0)
+        SaveCurrentNote();
+        AppSession.CurrentNoteRelativePath = _currentRelativePath;
+
+        if (Window.Current.Content is Frame frame) frame.Navigate(typeof(GraphPage));
+    }
+
+    private void OnSearchClicked(object sender, RoutedEventArgs e)
+    {
+        if (AppSession.VaultPath is null)
         {
-            PopulateNotesList(_notesById.Values.OrderBy(n => n.RelativePath));
+            StatusText.Text = "Open a vault first.";
             return;
         }
 
-        var results = OpenSearchIndex().Search(query);
-        StatusText.Text = $"{results.Count} search result(s) for \"{query}\".";
+        var clearedTagFilter = _activeTag is not null;
+        _activeTag = null;
+        PopulateTagsPanel();
+
+        var query = SearchBox.Text.Trim();
+        if (query.Length == 0)
+        {
+            RefreshNotesList();
+            return;
+        }
+
+        var results = AppSession.OpenSearchIndex().Search(query);
+        var clearedNote = clearedTagFilter ? " Tag filter cleared." : string.Empty;
+        StatusText.Text = $"{results.Count} search result(s) for \"{query}\".{clearedNote}";
 
         NotesList.Children.Clear();
         if (results.Count == 0)
@@ -125,30 +152,96 @@ public sealed partial class MainPage : Page
     private void OnClearSearchClicked(object sender, RoutedEventArgs e)
     {
         SearchBox.Text = string.Empty;
-        if (_vaultPath is null) return;
+        _activeTag = null;
+        PopulateTagsPanel();
+        RefreshNotesList();
+    }
 
-        StatusText.Text = $"Showing all {_notesById.Count} note(s).";
-        PopulateNotesList(_notesById.Values.OrderBy(n => n.RelativePath));
+    // Tag buttons are built in code, so this is called from the click handler
+    // rather than wired up in XAML.
+    private void OnTagClicked(string tag)
+    {
+        _activeTag = _activeTag == tag ? null : tag;
+        PopulateTagsPanel();
+        RefreshNotesList();
     }
 
     private void RescanAndRefreshList()
     {
-        var vaultIndex = OpenVaultIndex();
-        var vaultResult = new VaultScanner(_vaultPath!, vaultIndex).Scan();
+        var vaultIndex = AppSession.OpenVaultIndex();
+        var vaultResult = new VaultScanner(AppSession.VaultPath!, vaultIndex).Scan();
 
-        var linkIndex = OpenLinkIndex();
-        var linkResult = new LinkScanner(_vaultPath!, vaultIndex, linkIndex).Scan();
+        var linkIndex = AppSession.OpenLinkIndex();
+        var linkResult = new LinkScanner(AppSession.VaultPath!, vaultIndex, linkIndex).Scan();
 
-        new SearchScanner(_vaultPath!, vaultIndex, OpenSearchIndex()).Scan();
+        new SearchScanner(AppSession.VaultPath!, vaultIndex, AppSession.OpenSearchIndex()).Scan();
 
-        StatusText.Text = $"Notes: added {vaultResult.Added}, updated {vaultResult.Updated}, " +
-                           $"moved {vaultResult.Moved}, deleted {vaultResult.Deleted}, " +
-                           $"unchanged {vaultResult.Unchanged}. Links: {linkResult.Resolved} resolved, " +
-                           $"{linkResult.Unresolved} unresolved.";
+        var tagResult = new TagScanner(AppSession.VaultPath!, vaultIndex, AppSession.OpenTagIndex()).Scan();
 
         var notes = vaultIndex.GetAll().OrderBy(n => n.RelativePath).ToList();
         _notesById = notes.ToDictionary(n => n.Id);
+
+        PopulateTagsPanel();
+        RefreshNotesList(
+            $"Notes: added {vaultResult.Added}, updated {vaultResult.Updated}, " +
+            $"moved {vaultResult.Moved}, deleted {vaultResult.Deleted}, " +
+            $"unchanged {vaultResult.Unchanged}. Links: {linkResult.Resolved} resolved, " +
+            $"{linkResult.Unresolved} unresolved. Tags: {tagResult.TaggedNotes} tagged " +
+            $"note(s), {tagResult.DistinctTags} distinct.");
+    }
+
+    // Rebuilds the notes list from the current view state: everything, or just the
+    // notes carrying the active tag. statusPrefix lets a scan keep its summary
+    // visible instead of being replaced by the list description.
+    private void RefreshNotesList(string? statusPrefix = null)
+    {
+        var notes = _notesById.Values.OrderBy(n => n.RelativePath).ToList();
+
+        string status;
+        if (_activeTag is not null)
+        {
+            var taggedNoteIds = AppSession.OpenTagIndex().GetNoteIdsForTag(_activeTag).ToHashSet();
+            notes = notes.Where(n => taggedNoteIds.Contains(n.Id)).ToList();
+            status = $"Filtering by #{_activeTag}: {notes.Count} note(s). Click the tag again to clear.";
+        }
+        else
+        {
+            status = $"Showing all {notes.Count} note(s).";
+        }
+
         PopulateNotesList(notes);
+        StatusText.Text = statusPrefix is null ? status : $"{statusPrefix} {status}";
+    }
+
+    private void PopulateTagsPanel()
+    {
+        TagsList.Children.Clear();
+
+        if (AppSession.VaultPath is null)
+        {
+            TagsHeaderText.Text = "No tags yet.";
+            return;
+        }
+
+        var tagCounts = AppSession.OpenTagIndex().GetTagCounts();
+        TagsHeaderText.Text = _activeTag is not null
+            ? $"Tags - showing notes tagged #{_activeTag}. Click it again to clear:"
+            : tagCounts.Count == 0
+                ? "No tags yet."
+                : $"Tags ({tagCounts.Count}):";
+
+        foreach (var tagCount in tagCounts)
+        {
+            var button = new Button
+            {
+                Content = $"#{tagCount.Tag} ({tagCount.NoteCount})",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+            };
+            var tag = tagCount.Tag;
+            button.Click += (_, _) => OnTagClicked(tag);
+            TagsList.Children.Add(button);
+        }
     }
 
     // Plain Buttons in a StackPanel, not a ListView - a ListView (with or without
@@ -192,6 +285,7 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        AppSession.CurrentNoteRelativePath = relativePath;
         EditorStatusText.Text = relativePath is null ? "Select a note to edit." : $"Editing {relativePath}";
 
         // Deferred to the next dispatcher cycle - setting Editor.Text synchronously
@@ -199,7 +293,39 @@ public sealed partial class MainPage : Page
         // described above.
         DispatcherQueue.TryEnqueue(() => Editor.Text = content);
 
+        ShowNoteMetadata(relativePath, content);
         ShowBacklinks(relativePath);
+    }
+
+    // Read-only view of what the note declares: its own indexed metadata, its tags
+    // (already normalized by TagParser), and any other top-level frontmatter fields
+    // verbatim. Nothing here is interpreted or written back.
+    private void ShowNoteMetadata(string? relativePath, string content)
+    {
+        if (relativePath is null)
+        {
+            NoteMetadataText.Text = string.Empty;
+            return;
+        }
+
+        var lines = new List<string>();
+        var note = _notesById.Values.FirstOrDefault(n => n.RelativePath == relativePath);
+        if (note is not null)
+        {
+            lines.Add($"Path: {note.RelativePath}");
+            lines.Add($"Revision {note.Revision}, updated {note.UpdatedAt.LocalDateTime:g}");
+        }
+
+        IReadOnlyList<string> tags = note is null ? [] : AppSession.OpenTagIndex().GetTagsForNote(note.Id);
+        lines.Add(tags.Count == 0 ? "Tags: none" : $"Tags: {string.Join(' ', tags.Select(t => "#" + t))}");
+
+        // `id` and `tags` are already shown above (and the id is machine noise in a
+        // UI), so only the note's own custom fields are listed here.
+        lines.AddRange(FrontMatter.ReadFields(content)
+            .Where(field => field.Key != "id" && field.Key != "tags")
+            .Select(field => $"{field.Key}: {field.Value}"));
+
+        NoteMetadataText.Text = string.Join('\n', lines);
     }
 
     private void ShowBacklinks(string? relativePath)
@@ -207,7 +333,7 @@ public sealed partial class MainPage : Page
         var note = relativePath is null ? null : _notesById.Values.FirstOrDefault(n => n.RelativePath == relativePath);
         var backlinkNotes = note is null
             ? []
-            : OpenLinkIndex().GetBacklinkSourceIds(note.Id)
+            : AppSession.OpenLinkIndex().GetBacklinkSourceIds(note.Id)
                 .Select(id => _notesById.GetValueOrDefault(id))
                 .Where(n => n is not null)
                 .Select(n => n!)
@@ -237,17 +363,24 @@ public sealed partial class MainPage : Page
 
     private void SaveCurrentNote()
     {
-        if (_currentRelativePath is null || _vaultPath is null) return;
+        if (_currentRelativePath is null || AppSession.VaultPath is null) return;
 
         try
         {
             var text = NormalizeLineEndings(Editor.Text);
             File.WriteAllText(ResolvePath(_currentRelativePath), text);
 
-            var vaultIndex = OpenVaultIndex();
-            new VaultScanner(_vaultPath, vaultIndex).Scan();
-            new LinkScanner(_vaultPath, vaultIndex, OpenLinkIndex()).Scan();
-            new SearchScanner(_vaultPath, vaultIndex, OpenSearchIndex()).Scan();
+            var vaultIndex = AppSession.OpenVaultIndex();
+            new VaultScanner(AppSession.VaultPath, vaultIndex).Scan();
+            new LinkScanner(AppSession.VaultPath, vaultIndex, AppSession.OpenLinkIndex()).Scan();
+            new SearchScanner(AppSession.VaultPath, vaultIndex, AppSession.OpenSearchIndex()).Scan();
+            new TagScanner(AppSession.VaultPath, vaultIndex, AppSession.OpenTagIndex()).Scan();
+
+            // The edit can have added or removed tags, so the tag panel, the note's
+            // metadata line and the (possibly tag-filtered) list are all stale now.
+            PopulateTagsPanel();
+            ShowNoteMetadata(_currentRelativePath, text);
+            RefreshNotesList();
 
             EditorStatusText.Text = $"Editing {_currentRelativePath} (saved {DateTime.Now:T})";
         }
@@ -264,14 +397,5 @@ public sealed partial class MainPage : Page
         text.Replace("\r\n", "\n").Replace('\r', '\n');
 
     private string ResolvePath(string relativePath) =>
-        Path.Combine(_vaultPath!, relativePath.Replace('/', Path.DirectorySeparatorChar));
-
-    private static SqliteVaultIndex OpenVaultIndex() => new(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdBolsa.Dev", "index.db"));
-
-    private static SqliteLinkIndex OpenLinkIndex() => new(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdBolsa.Dev", "index.db"));
-
-    private static SqliteSearchIndex OpenSearchIndex() => new(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdBolsa.Dev", "index.db"));
+        Path.Combine(AppSession.VaultPath!, relativePath.Replace('/', Path.DirectorySeparatorChar));
 }

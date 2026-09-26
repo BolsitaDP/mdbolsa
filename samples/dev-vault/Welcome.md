@@ -11,3 +11,6 @@ safe to edit, break, or delete during local testing.
 
 See [[Personal/Home]] and [[Development/Docker]] for a couple more sample
 notes, including an example of a `[[wiki link]]`.
+
+This note also carries an inline tag, #sampled, so both tag sources
+(frontmatter `tags:` and inline `#hashtags`) are exercised by the dev vault.
