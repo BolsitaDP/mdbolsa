@@ -51,6 +51,14 @@ public sealed class SqliteSyncStateStore : ISyncStateStore
         command.ExecuteNonQuery();
     }
 
+    public void ResetCursor()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM sync_cursor";
+        command.ExecuteNonQuery();
+    }
+
     public string? GetPushedHash(Guid noteId)
     {
         using var connection = OpenConnection();
@@ -123,6 +131,15 @@ public sealed class SqliteSyncStateStore : ISyncStateStore
         command.Parameters.AddWithValue("$server", (object?)conflict.ServerRevision ?? DBNull.Value);
         command.Parameters.AddWithValue("$device", (object?)conflict.ServerDeviceId?.ToString() ?? DBNull.Value);
         command.Parameters.AddWithValue("$detected", conflict.DetectedAt.ToString("O"));
+        command.ExecuteNonQuery();
+    }
+
+    public void RemoveConflict(Guid noteId)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM sync_conflicts WHERE note_id = $noteId";
+        command.Parameters.AddWithValue("$noteId", noteId.ToString());
         command.ExecuteNonQuery();
     }
 

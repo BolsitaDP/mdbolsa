@@ -77,6 +77,7 @@ app.MapGet("/health", (ServerInfo info) => Results.Ok(new
 }));
 
 app.MapNoteEndpoints(token);
+app.MapConflictEndpoints(token);
 
 // The schema is created on boot, not by a migration step (see NoteSchema).
 // Failure here is fatal on purpose: a sync server that starts without its

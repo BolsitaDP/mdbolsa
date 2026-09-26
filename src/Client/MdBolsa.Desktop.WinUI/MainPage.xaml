@@ -24,6 +24,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -33,6 +34,7 @@
             <Button x:Name="OpenVaultButton" Content="Open vault" Click="OnOpenVaultClicked" />
             <Button x:Name="GraphButton" Content="Graph" Click="OnGraphClicked" />
             <Button x:Name="SyncButton" Content="Sync" Click="OnSyncClicked" />
+            <Button x:Name="ConflictsButton" Content="Conflicts" Click="OnConflictsClicked" />
             <Button x:Name="SyncSettingsButton" Content="Sync settings..." Click="OnSyncSettingsClicked" />
         </StackPanel>
 
@@ -53,16 +55,27 @@
             <PasswordBox x:Name="SyncTokenBox" Grid.Column="2" PlaceholderText="Sync token" />
             <Button Grid.Column="3" Content="Save" Click="OnSaveSyncSettingsClicked" />
         </Grid>
-        <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,8" Opacity="0.7"
+        <!--
+            Conflicts are resolved inline, for the same reason sync settings are:
+            no dialogs on this runtime. Each row offers the only two honest
+            choices - keep this device's copy, or take the server's - and neither
+            merges. See docs/decisions/0012-conflict-resolution.md.
+        -->
+        <StackPanel Grid.Row="2" x:Name="ConflictsPanel" Visibility="Collapsed" Margin="0,0,0,8">
+            <TextBlock Text="Conflicts" FontWeight="SemiBold" />
+            <TextBlock x:Name="ConflictsSummaryText" Opacity="0.7" Margin="0,4,0,4" TextWrapping="Wrap" />
+            <StackPanel x:Name="ConflictsList" Spacing="4" />
+        </StackPanel>
+        <TextBlock x:Name="StatusText" Grid.Row="3" Margin="0,8,0,8" Opacity="0.7"
                    Text="Enter a vault folder path above, then click Open vault." />
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
             <TextBox x:Name="SearchBox" Width="300" PlaceholderText="Search notes" />
             <Button x:Name="SearchButton" Content="Search" Click="OnSearchClicked" />
             <Button x:Name="ClearSearchButton" Content="Show all notes" Click="OnClearSearchClicked" />
         </StackPanel>
 
-        <Grid Grid.Row="4" ColumnSpacing="16">
+        <Grid Grid.Row="5" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="260" />
                 <ColumnDefinition Width="*" />

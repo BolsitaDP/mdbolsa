@@ -57,9 +57,21 @@ public class SyncIntegrationTests : IDisposable
             foreach (var id in _createdNoteIds)
             {
                 using var delete = connection.CreateCommand();
-                delete.CommandText = "DELETE FROM notes WHERE id = @id";
+                delete.CommandText = "DELETE FROM note_versions WHERE note_id = @id; DELETE FROM notes WHERE id = @id;";
                 delete.Parameters.AddWithValue("id", id);
                 delete.ExecuteNonQuery();
+            }
+
+            // Notes this test *pulled* from the shared database and then re-pushed
+            // got ids minted by the local scanner, so they aren't in the list above.
+            // Deleting by our own path prefix catches those too.
+            using (var byPrefix = connection.CreateCommand())
+            {
+                byPrefix.CommandText =
+                    "DELETE FROM note_versions WHERE note_id IN (SELECT id FROM notes WHERE relative_path LIKE @prefix);" +
+                    "DELETE FROM notes WHERE relative_path LIKE @prefix;";
+                byPrefix.Parameters.AddWithValue("prefix", _deviceId.ToString()[..8] + "/%");
+                byPrefix.ExecuteNonQuery();
             }
         }
         catch (Exception ex) when (ex is Npgsql.NpgsqlException or System.Net.Sockets.SocketException)
@@ -101,6 +113,26 @@ public class SyncIntegrationTests : IDisposable
     // Forward slashes, because that is what VaultScanner puts in the index and
     // therefore what the client sends to the server.
     private string Folder(string fileName) => $"{_deviceId.ToString()[..8]}/{fileName}";
+
+    // These tests share one development database, so a sync from the epoch also
+    // pulls in whatever every other test (and every previous run) left there.
+    // Once a test has settled its own note, this throws those foreign notes back
+    // out and forgets them, so the scenario under test only ever sees its own
+    // note. Without it, "this note conflicts" turns into "five notes conflict",
+    // which is true and useless.
+    private void IsolateToOurNotes()
+    {
+        var prefix = _deviceId.ToString()[..8];
+        foreach (var file in Directory.GetFiles(_vaultRoot, "*", SearchOption.AllDirectories))
+        {
+            if (!file.Contains(prefix, StringComparison.OrdinalIgnoreCase)) File.Delete(file);
+        }
+
+        var state = new SqliteSyncStateStore(_dbPath);
+        state.ResetCursor();
+        state.ClearConflicts();
+        Scan();
+    }
 
     private Guid WriteNote(string relativePath, string content)
     {
@@ -189,8 +221,8 @@ public class SyncIntegrationTests : IDisposable
         var id = WriteNote(Folder("Contested.md"), "# Original");
         Scan();
         var state = new SqliteSyncStateStore(_dbPath);
-        var client = Client(state, OpenVaultIndex());
-        await client.SyncAsync(_vaultRoot);
+        await Client(state, OpenVaultIndex()).SyncAsync(_vaultRoot);
+        IsolateToOurNotes();
 
         // Changed here...
         var localPath = Path.Combine(_vaultRoot, Folder("Contested.md"));
@@ -206,9 +238,14 @@ public class SyncIntegrationTests : IDisposable
             _otherDeviceId, DateTimeOffset.UtcNow.AddSeconds(30));
         await http.PutAsJsonAsync($"api/notes/{id}", body);
 
-        // A fresh store means a cursor at the epoch, so this pull sees the other
-        // device's change regardless of what else is in the shared dev database.
-        var result = await Client(new SqliteSyncStateStore(_dbPath), OpenVaultIndex()).SyncAsync(_vaultRoot);
+        // Reset the cursor so this pull starts from the epoch. The shared dev
+        // database can hold writes with timestamps ahead of ours (other tests use
+        // future-dated writes), and a cursor left over from the first sync could
+        // otherwise sit past our own note and hide the change we're testing.
+        var fresh = new SqliteSyncStateStore(_dbPath);
+        fresh.ResetCursor();
+
+        var result = await Client(fresh, OpenVaultIndex()).SyncAsync(_vaultRoot);
 
         Assert.Equal(1, result.Conflicts);
         // The local edit survives untouched, and the conflict is on record for

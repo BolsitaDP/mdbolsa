@@ -17,6 +17,11 @@ public interface ISyncStateStore
 
     void SetCursor(NoteCursor cursor);
 
+    // Forgets the cursor, so the next sync asks for everything from the epoch
+    // again. The recovery path for a cursor that has gone wrong (and how a client
+    // recovers from a server whose history it can't line up with).
+    void ResetCursor();
+
     // The content hash the server last confirmed for a note. Compared against the
     // note's current hash, it answers the only question that matters before
     // pushing or overwriting: "did I change this since the server last saw it?"
@@ -30,6 +35,11 @@ public interface ISyncStateStore
     IReadOnlyList<SyncConflict> GetConflicts();
 
     void AddConflict(SyncConflict conflict);
+
+    // Called once a person has decided what should happen to a conflicted note
+    // (see ConflictResolver). Until then the note stays out of sync in both
+    // directions, which is the safe direction to be wrong in.
+    void RemoveConflict(Guid noteId);
 
     void ClearConflicts();
 }

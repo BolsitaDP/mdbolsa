@@ -10,21 +10,25 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 9 - Client sync.** The desktop app and the server now talk to each
-other. Press **Sync** and the vault goes both ways: notes changed here are
-pushed, notes changed on another device are pulled into your files, a deletion
-on another device removes the file, and a note changed in *both* places is
-reported as a conflict with neither version overwritten (resolving those is the
-next phase). Configure it once with **Sync settings...** - server URL and the
-shared token. Writing a note never touches the network, so typing never waits on
-sync. See [docs/synchronization.md](docs/synchronization.md).
+**Phase 10 - Conflicts and version history.** When a note is changed in two
+places, the app now shows you both and asks - no version is merged or discarded
+behind your back. The server keeps **every** accepted revision, so the version
+you didn't pick is still there. Press **Conflicts** in the shell to see what's
+unresolved and choose: "Keep mine" pushes your copy over the server's (the old
+one becomes history), "Take theirs" writes the server's copy over your file.
+Nothing is ever merged automatically - a wrong automatic merge is worse than
+none. See [docs/synchronization.md](docs/synchronization.md) and
+[0012](docs/decisions/0012-conflict-resolution.md).
+
+**Phase 9 - Client sync.** Press **Sync** and the vault goes both ways; writing
+a note never touches the network, so typing never waits on sync. Configure it
+once with **Sync settings...** (server URL and shared token).
 
 **Phase 8 - Server foundation.** `MdBolsa.Server`: an ASP.NET Core API over
-PostgreSQL storing notes with the sync metadata this needs. The client doesn't
-speak to it until Phase 9. **No authentication** - an explicit, temporary
-decision, see [0010](docs/decisions/0010-server-foundation.md) - so it binds to
-localhost only, and in Production it refuses to start without a token. See
-[docs/deployment.md](docs/deployment.md).
+PostgreSQL. **No authentication** beyond one shared token - an explicit,
+temporary decision, see [0010](docs/decisions/0010-server-foundation.md) - so it
+binds to localhost only, and in Production it refuses to start without a token.
+See [docs/deployment.md](docs/deployment.md).
 
 Earlier phases: the WinUI shell opens a vault (Windows folder picker, choice
 remembered), lists its notes, lets you open/edit/save one as plain Markdown text

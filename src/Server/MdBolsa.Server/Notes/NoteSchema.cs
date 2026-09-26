@@ -2,27 +2,25 @@ using Npgsql;
 
 namespace MdBolsa.Server.Notes;
 
-// The one table that matters, created idempotently at startup. Same
-// "CREATE TABLE IF NOT EXISTS on boot, no migration framework" approach the
-// client's SQLite indexes use - a migration framework only earns its place once
-// a phase needs to *alter* an existing table, and Phase 10 (conflicts) is the
-// first thing that will.
+// Phase 10 adds the history table. See 0011 for the shape of everything else.
 //
-// The column set is the sync contract from vision.md §10, and it is deliberately
-// shaped so the Phase 9/10 questions stay answerable:
-//   - `updated_at` + `id` is the cursor for "everything since X" (watermark
-//     reads, so a note changed twice between polls is returned once).
-//   - `revision` is per-note and monotonic, so two devices editing the same note
-//     can be *detected* (Phase 10) even though resolution isn't designed yet.
-//   - `content_hash` lets a client skip re-downloading content it already has.
-//   - `deleted_at` is a tombstone rather than a hard delete: a delete that
-//     vanished from the table would be indistinguishable from "never synced",
-//     and a client that was offline would never learn about the deletion.
-// `device_id` records who wrote last, which conflict resolution and the audit
-// trail both need.
+// Two decisions worth stating:
+//
+//  * **Every accepted write is kept, nothing is pruned.** A personal vault's edit
+//    history is small, and "keep the last 10" is a policy that quietly destroys
+//    the thing someone came looking for. If that ever needs to change, it changes
+//    here, once.
+//  * **The previous row is copied before the current one is overwritten**, in the
+//    same transaction as the write. Doing it the other way round would leave a
+//    window where an accepted write had already destroyed the old content and the
+//    history insert hadn't landed - i.e. exactly the data loss the history exists
+//    to prevent.
+//
+// The revision number in the history row is the revision the content *had*, so
+// the newest row for a note is the current one.
 public static class NoteSchema
 {
-    public const string Version = "1";
+    public const string Version = "2";
 
     public static async Task InitialiseAsync(string connectionString, CancellationToken cancellationToken = default)
     {
@@ -60,6 +58,24 @@ public static class NoteSchema
                 -- a timestamp.
                 CREATE INDEX IF NOT EXISTS ix_notes_updated
                     ON notes(updated_at, id);
+
+                -- Phase 10: the edit history. One row per accepted revision.
+                CREATE TABLE IF NOT EXISTS note_versions (
+                    note_id       uuid        NOT NULL,
+                    revision      integer     NOT NULL,
+                    relative_path text        NOT NULL,
+                    content       text        NOT NULL,
+                    content_hash  text        NOT NULL,
+                    device_id     uuid        NOT NULL,
+                    updated_at    timestamptz NOT NULL,
+                    recorded_at   timestamptz NOT NULL DEFAULT now(),
+                    PRIMARY KEY (note_id, revision)
+                );
+
+                -- "Show me this note's history, newest first" is the only query that
+                -- matters, and it is asked per note.
+                CREATE INDEX IF NOT EXISTS ix_note_versions_note
+                    ON note_versions(note_id, revision DESC);
 
                 CREATE TABLE IF NOT EXISTS schema_version (
                     version    text        NOT NULL PRIMARY KEY,

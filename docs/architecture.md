@@ -278,6 +278,31 @@ Concretely:
 - 18 client unit tests (fake HTTP handler, no network) and 6 end-to-end tests
   against a real server and PostgreSQL, which return early when the dev stack
   isn't running.
+## Conflicts & Version History (Phase 10)
+
+- `note_versions` on the server: every accepted write leaves a copy, written in
+  the same transaction as the write that supersedes it - so there is never a
+  moment where the old content is gone and the history row hasn't landed, and a
+  refused write leaves no version behind. Nothing is pruned. Deletes archive too,
+  which makes an accidental deletion recoverable. Two new reads:
+  `GET /api/notes/{id}/versions` and `.../versions/{revision}`.
+- `MdBolsa.Core.Sync.ConflictResolver`: **keep mine** (push the local copy with
+  a fresh timestamp - no special endpoint needed, the server's newer-wins rule
+  *is* the takeover, and the replaced version is already archived) and **take
+  theirs** (fetch the server's copy, write it over the local file, record its
+  hash so the next sync doesn't re-conflict). No write to the server in the
+  second case: it already has that content.
+- **No automatic merging**, and that is the decision worth defending. A real
+  merge needs a common ancestor and Markdown-aware diffing; a wrong merge
+  produces a third version neither person wrote and destroys the disagreement
+  quietly. Until a conflict is resolved the note stays out of sync in both
+  directions. See [0012-conflict-resolution](decisions/0012-conflict-resolution.md).
+- A path collision is a 409 like a stale write, not a 500 - `NotePathConflictException`
+  existed from Phase 9 and wasn't mapped until the end-to-end tests hit it.
+- `ISyncStateStore.ResetCursor()` forgets the sync watermark so the next sync
+  re-reads everything: the recovery path for a cursor that has drifted.
+- The shell shows unresolved conflicts inline with the two buttons per note
+  (again: no dialogs on this runtime).
 ## Known Issues
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
@@ -434,4 +459,10 @@ Concretely:
   changed on both sides is reported as **one** conflict with neither version
   overwritten; a wrong token fails without touching the vault; syncing twice
   sends nothing the second time. All 6 run as tests against the real stack.
-- 178 tests pass (118 Core, 34 Data, 26 Server).
+- Phase 10 (conflicts/history) verified live against the real stack: writing a
+  note twice leaves the first version readable; a deleted note's content is
+  still in its history; a refused write leaves no version behind; "keep mine"
+  pushes the local copy over the server's and clears the conflict; "take theirs"
+  overwrites the local file and records the server's hash so the next sync
+  doesn't re-conflict. A path collision is a 409, not a 500.
+- 196 tests pass (126 Core, 34 Data, 36 Server).

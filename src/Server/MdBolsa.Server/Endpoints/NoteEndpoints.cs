@@ -50,7 +50,22 @@ public static class NoteEndpoints
             var validation = NoteValidation.Validate(note);
             if (validation is not null) return Results.BadRequest(new { error = validation });
 
-            var stored = await store.UpsertAsync(note, ct);
+            NoteStored? stored;
+            try
+            {
+                stored = await store.UpsertAsync(note, ct);
+            }
+            catch (NotePathConflictException clash)
+            {
+                // Another note already lives at that path. That is a conflict the
+                // client can report, not a server fault - 409, like the stale-write
+                // case below, and with the same body shape.
+                return Results.Conflict(new
+                {
+                    error = clash.Message,
+                    stored = await store.GetAsync(id, ct),
+                });
+            }
             if (stored is null)
             {
                 // The write lost to something newer already on the server.

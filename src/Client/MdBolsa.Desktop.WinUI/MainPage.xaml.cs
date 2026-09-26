@@ -291,6 +291,136 @@ public sealed partial class MainPage : Page
 
         return true;
     }
+    // --- Conflicts (Phase 10) ----------------------------------------------
+
+    private void OnConflictsClicked(object sender, RoutedEventArgs e)
+    {
+        var showing = ConflictsPanel.Visibility == Visibility.Visible;
+        ConflictsPanel.Visibility = showing ? Visibility.Collapsed : Visibility.Visible;
+        if (!showing) RenderConflicts();
+    }
+
+    // One row per conflicted note, with the two choices that exist. There is no
+    // merge button, on purpose: an automatic merge of two Markdown files needs a
+    // common ancestor and real diffing, and a wrong automatic merge is worse than
+    // none. See docs/decisions/0012-conflict-resolution.md.
+    private void RenderConflicts()
+    {
+        ConflictsList.Children.Clear();
+
+        var conflicts = AppSession.OpenSyncStateStore().GetConflicts();
+        ConflictsSummaryText.Text = conflicts.Count == 0
+            ? "No conflicts. Every note matches the server."
+            : $"{conflicts.Count} note(s) changed in two places. Nothing has been overwritten - " +
+              "choose which version to keep for each one.";
+
+        foreach (var conflict in conflicts)
+        {
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var name = new TextBlock
+            {
+                Text = conflict.RelativePath ?? conflict.NoteId.ToString(),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            Grid.SetColumn(name, 0);
+            row.Children.Add(name);
+
+            var noteId = conflict.NoteId;
+
+            var keepMine = new Button { Content = "Keep mine" };
+            keepMine.Click += async (_, _) => await ResolveConflictAsync(noteId, keepLocal: true);
+            Grid.SetColumn(keepMine, 1);
+            row.Children.Add(keepMine);
+
+            var takeTheirs = new Button { Content = "Take theirs" };
+            takeTheirs.Click += async (_, _) => await ResolveConflictAsync(noteId, keepLocal: false);
+            Grid.SetColumn(takeTheirs, 2);
+            row.Children.Add(takeTheirs);
+
+            ConflictsList.Children.Add(row);
+        }
+    }
+
+    private async Task ResolveConflictAsync(Guid noteId, bool keepLocal)
+    {
+        if (AppSession.VaultPath is null) return;
+        if (!TryCreateSyncClient(out var client, out var error) ||
+            !TryCreateConflictResolver(out var resolver, out error))
+        {
+            StatusText.Text = error;
+            return;
+        }
+
+        var result = keepLocal
+            ? await resolver.KeepLocalAsync(AppSession.VaultPath, noteId)
+            : await resolver.TakeRemoteAsync(AppSession.VaultPath, noteId);
+
+        if (!result.Resolved)
+        {
+            StatusText.Text = $"Could not resolve the conflict: {result.Error}";
+            return;
+        }
+
+        // Both choices change what the scanners would see (a new file, or a
+        // different one), so re-index and redraw rather than guess.
+        RescanAndRefreshList();
+        RenderConflicts();
+        ShowNoteMetadata(_currentRelativePath, ReadCurrentNoteContent() ?? string.Empty);
+
+        StatusText.Text = keepLocal
+            ? "Kept this device's version and pushed it. The server's version is in the note's history."
+            : "Took the server's version. Your copy is in the note's history if you need it.";
+    }
+
+    private string? ReadCurrentNoteContent()
+    {
+        if (_currentRelativePath is null || AppSession.VaultPath is null) return string.Empty;
+        try
+        {
+            return File.ReadAllText(ResolvePath(_currentRelativePath));
+        }
+        catch (IOException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private bool TryCreateConflictResolver(out ConflictResolver resolver, out string error)
+    {
+        resolver = null!;
+
+        var url = AppSession.ServerUrl;
+        if (string.IsNullOrWhiteSpace(url) ||
+            !Uri.TryCreate(url, UriKind.Absolute, out var baseAddress) ||
+            baseAddress.Scheme is not ("http" or "https"))
+        {
+            error = "No usable sync server configured. Press Sync settings... first.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(AppSession.ServerToken))
+        {
+            error = "No sync token configured. Press Sync settings... and enter the server's token.";
+            return false;
+        }
+
+        if (!url.EndsWith('/')) baseAddress = new Uri(url + "/");
+        var http = new HttpClient { BaseAddress = baseAddress, Timeout = TimeSpan.FromSeconds(30) };
+        resolver = new ConflictResolver(
+            http,
+            AppSession.DeviceId,
+            AppSession.ServerToken,
+            AppSession.OpenSyncStateStore(),
+            AppSession.OpenVaultIndex());
+
+        error = string.Empty;
+        return true;
+    }
     // Phase 7's graph view. It is hosted in a Frame inside this page, *not* reached
     // by navigating the root Frame: that unloads MainPage, and unloading a page
     // holding the Editor TextBox crashes the process natively

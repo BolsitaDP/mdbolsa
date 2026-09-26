@@ -277,6 +277,8 @@ public class NoteSyncClientTests : IDisposable
 
         public void SetCursor(NoteCursor cursor) => Cursor = cursor;
 
+        public void ResetCursor() => Cursor = null;
+
         public string? GetPushedHash(Guid noteId) => _hashes.GetValueOrDefault(noteId);
 
         public void SetPushedHash(Guid noteId, string hash) => _hashes[noteId] = hash;
@@ -284,6 +286,8 @@ public class NoteSyncClientTests : IDisposable
         public IReadOnlyList<SyncConflict> GetConflicts() => _conflicts;
 
         public void AddConflict(SyncConflict conflict) => _conflicts.Add(conflict);
+
+        public void RemoveConflict(Guid noteId) => _conflicts.RemoveAll(c => c.NoteId == noteId);
 
         public void ClearConflicts() => _conflicts.Clear();
     }

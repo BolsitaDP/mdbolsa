@@ -58,19 +58,40 @@ Two headers on everything under `/api/notes`: `X-MdBolsa-Token` and
 timestamps, so a moved clock doesn't make a note look edited. The hash is
 recorded only after the server accepts a write.
 
-## Conflicts: detected, not resolved
+## Conflicts: choose a version, never merge
 
 A note changed in two places is left alone on both sides and recorded. The
-status bar names them; `sync_conflicts` keeps them across restarts. **Nothing is
-merged and no winner is picked** - that's Phase 10, and the schema already
-carries what it needs.
+**Conflicts** button in the shell lists them, and each one offers the only two
+honest choices:
 
-## Still open (Phase 10 and after)
+- **Keep mine** - your version is pushed over the server's, with a fresh
+  timestamp. The server's version becomes history, not rubble.
+- **Take theirs** - the server's version is written over your file. Nothing is
+  sent; it already has that content.
 
-- **Conflict resolution**: merge, pick, or fork. Until then a conflicted note
-  simply stops syncing in either direction until a human decides.
-- **Version history**: the server keeps one version per note, so "what did
-  their edit look like?" isn't answerable yet.
-- **Triggers**: debounce after edits, periodic, on reconnect.
+Until you choose, the note stays out of sync **in both directions**, which is
+the safe direction to be wrong in.
+
+**Nothing is ever merged automatically.** A real merge needs a common ancestor
+and Markdown-aware diffing, and a wrong merge produces a third version neither
+person wrote while quietly destroying the disagreement. That could be a later
+phase with its own ADR, but it should be asked for by someone who has hit a real
+merge.
+
+### History
+
+Every accepted write is kept by the server, so the version you didn't pick is
+always there:
+
+```
+GET /api/notes/{id}/versions        newest first
+GET /api/notes/{id}/versions/{rev}   one revision's content
+```
+
+## Still open
+
+- **Triggers**: sync is manual today. Debounce after edits, periodic, on
+  reconnect - all just different callers of the same `SyncAsync`.
 - **Authentication**: one shared token is enough for a home network and not for
   anything else. Per-device tokens with rotation are the obvious next step.
+- **Attachments** (Phase 11) and their own sync story.
