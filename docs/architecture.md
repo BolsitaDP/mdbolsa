@@ -257,6 +257,44 @@ Concretely:
   any "fixed" native crash here as fixed only after several cold
   launches, not one.
 
+- **Navigating the root `Frame` away from `MainPage` crashes the
+  process**, and **opening any XAML popup crashes it too.** Both
+  confirmed by bisection on this machine, both `0xc000027b`:
+  - The Phase 7 graph view was originally reached with
+    `RootFrame.Navigate(typeof(GraphPage))`. That *unloads* `MainPage`,
+    and unloading a page holding the `Editor` TextBox killed the
+    process - reproduced with an **empty** `GraphPage` and an empty
+    `OnLoaded`, so it is the teardown, not the graph. The graph now
+    lives in a `Frame` *inside* `MainPage` (`GraphHost`); `MainContent`
+    is only hidden, so the editor is never torn down.
+  - The Phase 8-ish note rename originally used a
+    `MenuFlyout`/`ContextFlyout` on each note row, plus a
+    `ContentDialog`. Right-clicking a note killed the process every
+    time. Renaming is now **inline**: right-click swaps the row for a
+    `TextBox` (Enter commits, Escape or losing focus cancels), which
+    involves no popup at all. Verified: no crashes after the change.
+
+  **The rules this adds for this shell:** don't navigate the root
+  `Frame` away from the page that owns the editor, and don't use XAML
+  popups (`MenuFlyout`, `ContextFlyout`, `ContentDialog`,
+  `Flyout`) on this runtime at all. Native dialogs are fine - the
+  `Microsoft.Windows.Storage.Pickers.FolderPicker` works, because it's
+  a system dialog, not a XAML popup. If a future phase genuinely needs
+  a popup, the first thing to try is a newer (non-preview) Windows App
+  SDK, and verify with several cold launches before believing it.
+
+- **Verifying UI behaviour from the tooling is awkward, and two
+  things that look like findings aren't.** `TextBox.TextBox`'s UIA
+  `InvokePattern` throws from a non-interactive shell (so a "click"
+  scripted that way may never happen), and synthetic mouse input only
+  lands while the app still has the foreground - which a background
+  shell cannot reliably take. Meanwhile a `STATUS_STOWED_EXCEPTION`
+  kill leaves a process that is *alive with a window but with an empty
+  UIA tree*, which reads exactly like "the app did nothing". Both cost
+  real time to rule out here; when the UI misbehaves, check the
+  Application event log for `0xc000027b` before believing the UI is
+  at fault.
+
 ## WinUI Project Notes (Phase 1)
 
 - The template defaults to `<Platforms>x86;x64;ARM64</Platforms>`,

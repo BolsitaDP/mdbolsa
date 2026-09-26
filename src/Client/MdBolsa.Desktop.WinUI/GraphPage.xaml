@@ -56,7 +56,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="SelectionText" VerticalAlignment="Center" Opacity="0.7"
                            TextWrapping="Wrap"
-                           Text="Select a node to see what it is. Drag to pan, wheel to zoom." />
+                           Text="Select a node to see what it is. Drag to pan, use the zoom buttons to zoom." />
                 <Button x:Name="CenterOnSelectionButton" Grid.Column="1" Content="Make center"
                         Click="OnCenterOnSelectionClicked" IsEnabled="False" />
             </Grid>

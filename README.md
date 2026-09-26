@@ -15,14 +15,24 @@ notes, lets you open/edit/save one as plain Markdown text while seeing its
 backlinks, searches the whole vault (SQLite FTS5 — no new dependency), reads
 tags from both frontmatter (`tags:`) and inline `#hashtags` into a tag panel —
 click a tag to filter the notes list — shows a read-only line with the note's own
-metadata, and now has a graph view: whole-vault or note-local, with a
-force-directed layout computed in Core and drawn as circles and lines (drag to
-pan, click a node to inspect it). Phase 3's editor (typing + saving) was blocked
-for a while by a WindowsAppSDK 2.4.0 crash reading a `TextBox`'s edited content
-back — resolved (see docs/architecture.md's Known Issues section for what fixed
-it and what's still not fully understood about why). See
+metadata, and has a graph view: whole-vault or note-local, with a force-directed
+layout computed in Core and drawn as circles and lines (drag to pan, click a node
+to inspect it). Picking the vault uses the Windows folder picker, the choice is
+remembered, and right-clicking a note renames it. Phase 3's editor (typing +
+saving) was blocked for a while by a WindowsAppSDK 2.4.0 crash reading a
+`TextBox`'s edited content back; that and two later native crashes (navigating
+the page that owns the editor, and opening XAML popups) are documented in
+docs/architecture.md's Known Issues section — read it before adding UI, because
+this runtime is unforgiving. See
 [docs/vision.md §17](docs/vision.md#17-phased-roadmap) for the full phase
 roadmap.
+
+## Running it
+
+Double-click **`mdbolsa.lnk`** on the desktop: it rebuilds and launches the
+shell. There is no standalone `.exe` — this is a packaged WinUI 3 app, so it
+needs package identity; see [docs/development.md](docs/development.md) for why,
+and for the exact commands.
 
 ## Structure
 
@@ -31,9 +41,11 @@ docs/                       Vision, architecture, dev/deploy/sync docs, ADRs
 src/Client/MdBolsa.Core/     Domain logic, parsing, indexing (platform-agnostic)
 src/Client/MdBolsa.Data/     SQLite-backed storage (platform-agnostic)
 src/Client/MdBolsa.Desktop.WinUI/  WinUI 3 shell
-tests/                       Unit tests for Core and Data
+src/Server/MdBolsa.Server/   ASP.NET Core sync/storage API (Phase 8)
+tests/                       Unit tests for Core, Data and Server
 samples/dev-vault/           Fake vault used as the Development default
 config/                      `.example` templates for local config/secrets
+run.cmd                      Build + launch the desktop shell
 ```
 
 ## Build

@@ -361,7 +361,7 @@ public sealed partial class GraphPage : Page
     {
         if (_selectedKey is null || _graph.Find(_selectedKey) is not { } node)
         {
-            SelectionText.Text = "Select a node to see what it is. Drag to pan, wheel to zoom.";
+            SelectionText.Text = "Select a node to see what it is. Drag to pan, use the zoom buttons to zoom.";
             CenterOnSelectionButton.IsEnabled = false;
             return;
         }
