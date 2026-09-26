@@ -1,10 +1,11 @@
+using MdBolsa.Contracts;
 using MdBolsa.Server.Endpoints;
 using MdBolsa.Server.Notes;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------------
-// Environment and database wiring.
+// Environment, database and token.
 //
 // Development/production isolation is the requirement vision.md §7 calls
 // "extremely important", so it is enforced here rather than left to
@@ -15,15 +16,19 @@ var builder = WebApplication.CreateBuilder(args);
 //     connection string. A development build can't reach production by
 //     accident, because pointing it at production requires setting a value
 //     that has no default anywhere in this repo.
-//   * The environment and the database host are logged at startup, so a
-//     misconfigured deploy is obvious in the first three lines of output.
+//   * The same applies to the sync token: Production must be given one, and it
+//     must not be the development default. An unauthenticated note store is
+//     not a production configuration.
+//   * The environment, the database host and whether a token is configured are
+//     logged at startup - never the token itself.
 // ---------------------------------------------------------------------------
 var environment = builder.Environment.EnvironmentName;
+var isProduction = environment == Environments.Production;
 var connectionString = builder.Configuration.GetConnectionString("Postgres");
 
 if (string.IsNullOrWhiteSpace(connectionString))
 {
-    if (environment == Environments.Production)
+    if (isProduction)
     {
         throw new InvalidOperationException(
             "No ConnectionStrings:Postgres configured. Production must be given an explicit " +
@@ -36,31 +41,42 @@ if (string.IsNullOrWhiteSpace(connectionString))
                        "Password=mdbolsa_dev;Pooling=true;Maximum Pool Size=20";
 }
 
+var token = builder.Configuration["Sync:Token"];
+
+if (isProduction && string.IsNullOrWhiteSpace(token))
+{
+    throw new InvalidOperationException(
+        "No Sync:Token configured. Production must be given a shared sync token - an " +
+        "unauthenticated note store is not a production configuration.");
+}
+
 builder.Services.AddSingleton(new NoteStore(connectionString));
-builder.Services.AddSingleton(new DatabaseInfo(
+builder.Services.AddSingleton(new ServerInfo(
     environment,
     DescribeHost(connectionString),
-    NoteSchema.Version));
+    NoteSchema.Version,
+    isProduction ? "shared token" : string.IsNullOrWhiteSpace(token) ? "none" : "shared token (development default)"));
 
 var app = builder.Build();
 
-var info = app.Services.GetRequiredService<DatabaseInfo>();
+var info = app.Services.GetRequiredService<ServerInfo>();
 app.Logger.LogWarning(
-    "mdbolsa server starting: environment={Environment} database={Host} schema={Schema} auth=none",
-    info.Environment, info.Host, info.SchemaVersion);
+    "mdbolsa server starting: environment={Environment} database={Host} schema={Schema} auth={Auth}",
+    info.Environment, info.Host, info.SchemaVersion, info.Authentication);
 
-app.MapGet("/health", (DatabaseInfo info) => Results.Ok(new
+app.MapGet("/health", (ServerInfo info) => Results.Ok(new
 {
     status = "ok",
     environment = info.Environment,
     database = info.Host,
     schemaVersion = info.SchemaVersion,
-    // Stated plainly rather than implied: vision.md §9 lists authentication
-    // secrets as production configuration, and this phase has none.
-    authentication = "none",
+    // Stated plainly rather than implied. vision.md §9 lists authentication
+    // secrets as production configuration, and this phase refuses to start in
+    // Production without one.
+    authentication = info.Authentication,
 }));
 
-app.MapNoteEndpoints();
+app.MapNoteEndpoints(token);
 
 // The schema is created on boot, not by a migration step (see NoteSchema).
 // Failure here is fatal on purpose: a sync server that starts without its
@@ -89,4 +105,4 @@ static string DescribeHost(string connectionString)
 }
 
 /// <summary>Startup facts worth logging, and worth exposing on /health.</summary>
-public sealed record DatabaseInfo(string Environment, string Host, string SchemaVersion);
+public sealed record ServerInfo(string Environment, string Host, string SchemaVersion, string Authentication);

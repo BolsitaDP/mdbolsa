@@ -13,14 +13,17 @@
       SQLite indexes (docs/architecture.md's dependency table). The server is a
       thin storage/sync API over one table; a mapping layer would be overhead
       with nothing to map.
-
-      No reference to MdBolsa.Core on purpose. The server's DTOs are its own
-      wire contract, and the client doesn't speak to the server until Phase 9.
-      When it does, the contract needs a home both sides can reference (a
-      MdBolsa.Contracts project, or Core) - noted in
-      docs/decisions/0010-server-foundation.md rather than guessed at now.
     -->
     <PackageReference Include="Npgsql" Version="8.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The wire contract, shared with the client. See
+      docs/decisions/0011-client-sync.md: the server's DTOs used to be its own,
+      which was fine until Phase 9 gave the client something to say.
+    -->
+    <ProjectReference Include="..\..\Shared\MdBolsa.Contracts\MdBolsa.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

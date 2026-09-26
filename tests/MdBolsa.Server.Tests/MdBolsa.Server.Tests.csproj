@@ -22,6 +22,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Server\MdBolsa.Server\MdBolsa.Server.csproj" />
+    <!-- For the end-to-end sync tests, which drive the real client against a
+         running server: Core has the sync client and the vault scanners, Data the
+         SQLite state store and note index. -->
+    <ProjectReference Include="..\..\src\Client\MdBolsa.Core\MdBolsa.Core.csproj" />
+    <ProjectReference Include="..\..\src\Client\MdBolsa.Data\MdBolsa.Data.csproj" />
   </ItemGroup>
 
 </Project>

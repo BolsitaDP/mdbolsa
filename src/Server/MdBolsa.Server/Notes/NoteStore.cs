@@ -1,3 +1,4 @@
+using MdBolsa.Contracts;
 using Npgsql;
 
 namespace MdBolsa.Server.Notes;
@@ -18,7 +19,7 @@ namespace MdBolsa.Server.Notes;
 // detect it, and stops a stale write from destroying a newer one.
 public sealed class NoteStore(string connectionString)
 {
-    public async Task UpsertAsync(NoteUpsert note, CancellationToken cancellationToken = default)
+    public async Task<NoteStored?> UpsertAsync(NoteUpsert note, CancellationToken cancellationToken = default)
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -37,11 +38,26 @@ public sealed class NoteStore(string connectionString)
                 device_id     = EXCLUDED.device_id,
                 updated_at    = EXCLUDED.updated_at,
                 deleted_at    = NULL
-            WHERE EXCLUDED.updated_at >= notes.updated_at;
+            WHERE EXCLUDED.updated_at >= notes.updated_at
+            RETURNING id, relative_path, title, content_hash, revision, device_id, updated_at, deleted_at;
             """;
 
         AddNoteParameters(command, note);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            // No row returned means the WHERE clause rejected the write: something
+            // newer is already stored. The caller turns that into a conflict report
+            // rather than pretending the write landed.
+            return await reader.ReadAsync(cancellationToken) ? ReadStored(reader) : null;
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            // Another note already holds this path. That is a conflict to report,
+            // not a server fault.
+            throw new NotePathConflictException(note.RelativePath);
+        }
     }
 
     // Tombstone rather than DELETE. A hard delete is invisible to a client that
@@ -152,6 +168,17 @@ public sealed class NoteStore(string connectionString)
         command.Parameters.AddWithValue("device", note.DeviceId);
         command.Parameters.AddWithValue("updated", note.UpdatedAt);
     }
+
+    private static NoteStored ReadStored(NpgsqlDataReader reader) =>
+        new(
+            reader.GetGuid(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetInt32(4),
+            reader.GetGuid(5),
+            reader.GetFieldValue<DateTimeOffset>(6),
+            !reader.IsDBNull(7));
 
     private static NoteRecord ReadNote(NpgsqlDataReader reader) =>
         new(

@@ -1,6 +1,7 @@
 using MdBolsa.Core.Links;
 using MdBolsa.Core.Search;
 using MdBolsa.Core.Tags;
+using MdBolsa.Core.Sync;
 using MdBolsa.Core.Vault;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Dispatching;
@@ -164,6 +165,132 @@ public sealed partial class MainPage : Page
 
     private void OnSaveClicked(object sender, RoutedEventArgs e) => SaveCurrentNote();
 
+    // --- Sync (Phase 9) ----------------------------------------------------
+
+    // Sync settings are edited inline (no dialog - popups crash this runtime).
+    private void OnSyncSettingsClicked(object sender, RoutedEventArgs e)
+    {
+        var showing = SyncSettingsPanel.Visibility == Visibility.Visible;
+        if (showing)
+        {
+            SyncSettingsPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SyncServerBox.Text = AppSession.ServerUrl ?? string.Empty;
+        SyncTokenBox.Password = AppSession.ServerToken ?? string.Empty;
+        SyncSettingsPanel.Visibility = Visibility.Visible;
+    }
+
+    private void OnSaveSyncSettingsClicked(object sender, RoutedEventArgs e)
+    {
+        var url = SyncServerBox.Text.Trim();
+        if (url.Length > 0 &&
+            (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) ||
+             parsed.Scheme is not ("http" or "https")))
+        {
+            StatusText.Text = "The sync server URL has to be an http(s) address, e.g. http://localhost:5080";
+            return;
+        }
+
+        AppSession.ServerUrl = url.Length == 0 ? null : url;
+        AppSession.ServerToken = SyncTokenBox.Password.Length == 0 ? null : SyncTokenBox.Password;
+        SyncSettingsPanel.Visibility = Visibility.Collapsed;
+
+        StatusText.Text = AppSession.ServerUrl is null
+            ? "Sync is not configured. Press Sync settings... to set a server."
+            : $"Sync configured for {AppSession.ServerUrl} (device {AppSession.DeviceId.ToString()[..8]}).";
+    }
+
+    private async void OnSyncClicked(object sender, RoutedEventArgs e)
+    {
+        if (AppSession.VaultPath is null)
+        {
+            StatusText.Text = "Open a vault first.";
+            return;
+        }
+
+        if (!TryCreateSyncClient(out var client, out var error))
+        {
+            StatusText.Text = error;
+            return;
+        }
+
+        SyncButton.IsEnabled = false;
+        SyncButton.Content = "Syncing...";
+
+        try
+        {
+            // The local indexes have to be current *before* the sync: the push
+            // side works from the note list, and a note saved since the last scan
+            // would otherwise not be offered to the server.
+            RescanAndRefreshList();
+
+            var result = await client.SyncAsync(AppSession.VaultPath);
+
+            if (result.Failed)
+            {
+                StatusText.Text = $"Sync failed: {result.Error}";
+                return;
+            }
+
+            // The pull may have written or deleted .md files, so the indexes and
+            // every panel derived from them are stale until we scan again.
+            RescanAndRefreshList();
+
+            var conflicts = AppSession.OpenSyncStateStore().GetConflicts();
+            StatusText.Text = conflicts.Count == 0
+                ? $"Synced: {result.Pulled} pulled, {result.Pushed} pushed, {result.Deleted} deleted."
+                : $"Synced: {result.Pulled} pulled, {result.Pushed} pushed, {result.Deleted} deleted. " +
+                  $"{conflicts.Count} conflict(s) changed in two places - nothing was overwritten: " +
+                  string.Join("; ", conflicts.Take(3).Select(c => c.ToString()));
+        }
+        finally
+        {
+            SyncButton.IsEnabled = true;
+            SyncButton.Content = "Sync";
+        }
+    }
+
+    private bool TryCreateSyncClient(out NoteSyncClient client, out string error)
+    {
+        client = null!;
+        error = string.Empty;
+
+        var url = AppSession.ServerUrl;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            error = "Sync is not configured. Press Sync settings... to set a server.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(AppSession.ServerToken))
+        {
+            error = "No sync token configured. Press Sync settings... and enter the server's token.";
+            return false;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var baseAddress) ||
+            baseAddress.Scheme is not ("http" or "https"))
+        {
+            error = $"\"{url}\" is not a valid sync server address.";
+            return false;
+        }
+
+        // A base address without a trailing slash makes every relative request
+        // drop its last segment, which looks like a 404 for the wrong endpoint.
+        if (!url.EndsWith('/')) baseAddress = new Uri(url + "/");
+
+        var http = new HttpClient { BaseAddress = baseAddress, Timeout = TimeSpan.FromSeconds(30) };
+        client = new NoteSyncClient(
+            http,
+            AppSession.DeviceId,
+            AppSession.ServerToken,
+            AppSession.OpenSyncStateStore(),
+            AppSession.OpenVaultIndex());
+
+        return true;
+    }
     // Phase 7's graph view. It is hosted in a Frame inside this page, *not* reached
     // by navigating the root Frame: that unloads MainPage, and unloading a page
     // holding the Editor TextBox crashes the process natively

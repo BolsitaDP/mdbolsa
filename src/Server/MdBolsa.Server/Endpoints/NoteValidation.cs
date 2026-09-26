@@ -1,4 +1,4 @@
-using MdBolsa.Server.Notes;
+using MdBolsa.Contracts;
 
 namespace MdBolsa.Server.Endpoints;
 

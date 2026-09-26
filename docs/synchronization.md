@@ -1,65 +1,76 @@
 # Synchronization
 
-The server foundation exists (Phase 8, [0010](decisions/0010-server-foundation.md));
-**no client sync does** - that's Phase 9. This document records the contract
-the server already implements, so the client half can be built against it, and
-what's deliberately still open.
+The client and server both exist: Phase 8 built the API
+([0010](decisions/0010-server-foundation.md)) and Phase 9 made the client speak
+to it ([0011](decisions/0011-client-sync.md)). This document is the contract
+between them.
 
 ## Philosophy (unchanged, and still binding)
 
 - **Local-first**: writing a note never depends on the server or the network.
-  Sync is a background concern layered on top of a fully-functional offline app.
-- **Incremental**: never re-upload the whole vault. The server answers "give me
-  everything changed since X" with `GET /api/notes/changes`.
-- **Asynchronous**: typing must never wait on sync. Trigger choice is still
-  deferred to Phase 9; the debounce/periodic/manual options in
-  [vision.md §10](vision.md#10-synchronization-philosophy) are all still open.
+  Saving does no network work at all - sync happens when you press the button.
+- **Incremental**: never re-upload the whole vault. `GET /api/notes/changes`
+  answers "everything that changed since X", and the client only sends notes
+  whose content hash differs from what the server last confirmed.
+- **Asynchronous**: typing never waits on sync. Debounce-after-edit, periodic
+  sync and sync-on-reconnect remain open triggers ([vision.md §10](vision.md#10-synchronization-philosophy));
+  none of them need a design change, only a different caller of `SyncAsync`.
 
-## What the server already stores (the sync contract)
+## Using it
 
-One row per note, carrying the identity and revision metadata §10 asks for:
+1. Start the server: `docker compose up -d`, then
+   `dotnet run --project src/Server/MdBolsa.Server`. The development token is in
+   `appsettings.Development.json` and must match what the client is given.
+2. In the app: **Sync settings...**, enter the server URL
+   (`http://localhost:5080`) and the token, **Save**.
+3. **Sync**. The status bar reports what moved in each direction.
 
-| Field | Meaning |
+The device id is generated on first use and kept in the app's settings; it is
+how the server records who wrote last.
+
+## The contract
+
+One row per note. `id`, `content_hash`, `revision`, `device_id`, `updated_at`,
+and `deleted_at` as a tombstone (see [0010](decisions/0010-server-foundation.md)).
+
+| | |
 |---|---|
-| `id` | The note's frontmatter `id:` — stable across renames and moves ([0005](decisions/0005-stable-note-identity.md)) |
-| `relative_path`, `title`, `content` | The note, stored byte-for-byte. The server never parses Markdown |
-| `content_hash` | Lets a client skip content it already has |
-| `revision` | Per-note and monotonic — what makes a conflict detectable |
-| `device_id` | Which device wrote last |
-| `updated_at` | The sync watermark |
-| `deleted_at` | Tombstone. A deletion is a row that survives, not a missing row |
+| `GET /health` | Open. Reports environment, database, schema version, and which auth is in force |
+| `GET /api/notes/changes` | Incremental feed, paged by an `(updated_at, id)` watermark |
+| `GET /api/notes/{id}` | One note |
+| `PUT /api/notes/{id}` | Store a change; **409** if refused, with the stored state |
+| `DELETE /api/notes/{id}` | Tombstone; needs `X-MdBolsa-Device` |
 
-Endpoints: `GET/PUT/DELETE /api/notes/{id}` and `GET /api/notes/changes`.
+Two headers on everything under `/api/notes`: `X-MdBolsa-Token` and
+`X-MdBolsa-Device`.
 
-Two rules the client must know:
+## What the client does, in order
 
-- **Paging is a `(updated_at, id)` watermark.** Both halves matter: notes can
-  share a timestamp, and a timestamp-only cursor skips rows on the boundary.
-  Feed `nextCursor` back as `cursorAt` + `cursorId`.
-- **A stale write is not applied.** Writes are gated on `updated_at >= the
-  stored value`, so last writer by clock wins and an older write is dropped.
-  This is *not* conflict resolution, and the server does not report the drop —
-  see below.
+1. **Rescan** the vault, so the push side works from a current note list.
+2. **Pull.** For each change: write it if this device hasn't touched the note
+   since the server last confirmed it, delete the file if it's a tombstone, and
+   *record a conflict and touch nothing* if both sides changed.
+3. **Push** every note whose hash differs from the server's, and record the
+   conflict when the server answers 409.
+4. **Rescan** again - the pull may have written or deleted files.
 
-## Open for Phase 9 (client half)
+"Has this device touched it?" is answered by comparing content hashes, not
+timestamps, so a moved clock doesn't make a note look edited. The hash is
+recorded only after the server accepts a write.
 
-- How the client discovers a change: polling `/changes` on a debounce, on app
-  startup/shutdown, on network reconnect, or a manual Sync action.
-- Where the client stores its own sync cursor (a local settings file, next to
-  the SQLite index it already keeps).
-- **Authentication.** The API has none, deliberately and temporarily
-  ([0010](decisions/0010-server-foundation.md)). A bearer token per device is the
-  simplest thing that fits a personal self-hosted server. This is the first thing
-  to add before the server is reachable from anywhere but localhost.
-- Integration tests against the compose database, replacing the hand-run `curl`
-  sequence used to verify Phase 8.
+## Conflicts: detected, not resolved
 
-## Conflicts
+A note changed in two places is left alone on both sides and recorded. The
+status bar names them; `sync_conflicts` keeps them across restarts. **Nothing is
+merged and no winner is picked** - that's Phase 10, and the schema already
+carries what it needs.
 
-Unchanged from [vision.md §11](vision.md#11-conflict-handling) and still
-Phase 10. What Phase 8 guarantees is only that a conflict is *detectable*: both
-revisions survive, `device_id` says who wrote last, and the stale write is not
-silently applied over the newer one. Nothing merges, nothing is reported back to
-the losing device, and no version history is kept yet. The delete endpoint
-stamps tombstones with the server's clock rather than the client's, which is
-fine for one device and will need to change when the second one arrives.
+## Still open (Phase 10 and after)
+
+- **Conflict resolution**: merge, pick, or fork. Until then a conflicted note
+  simply stops syncing in either direction until a human decides.
+- **Version history**: the server keeps one version per note, so "what did
+  their edit look like?" isn't answerable yet.
+- **Triggers**: debounce after edits, periodic, on reconnect.
+- **Authentication**: one shared token is enough for a home network and not for
+  anything else. Per-device tokens with rotation are the obvious next step.

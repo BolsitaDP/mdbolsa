@@ -245,6 +245,39 @@ Concretely:
   fails with "syntax error at or near $"), and a multi-statement command cannot
   carry parameters at all.
 
+## Client Sync (Phase 9)
+
+- `src/Shared/MdBolsa.Contracts`: the sync wire contract (DTOs + header names),
+  referenced by both the server and `MdBolsa.Core`. Phase 8's DTOs were the
+  server's own; two hand-written copies of a sync contract is drift that only
+  shows up in production.
+- `MdBolsa.Core.Sync`: `NoteSyncClient`, `ISyncStateStore`, `SyncResult`,
+  `SyncConflict`. Two properties matter more than the rest:
+  - **Pull happens before push.** A client that pushes first can't tell a stale
+    local copy from a fresh one, and would overwrite a newer remote edit without
+    seeing it.
+  - **"Changed here since the server last saw it" is a hash comparison, not a
+    timestamp** (the hash the server last confirmed is kept in the sync state
+    store). A moved clock doesn't make a note look edited, and a note that only
+    changed over there is unambiguously safe to overwrite locally.
+- `MdBolsa.Data.Sync.SqliteSyncStateStore`: cursor, per-note pushed hash, and
+  recorded conflicts, in the same SQLite file as the other local indexes. All of
+  it is rebuildable - the `.md` files are the source of truth. The device id is
+  per *machine*, so it lives in the app's settings store instead.
+- Authentication: one shared token in `X-MdBolsa-Token`, compared on hashes in
+  constant time. `/health` stays open and says which auth is in force. In
+  Production the server refuses to start without a token.
+- The shell adds a **Sync** button and an inline **Sync settings** panel (no
+  dialog - popups crash this runtime). Saving a note does no network work at
+  all: typing never waits on a round trip, per vision.md §10.
+- Conflicts are **detected and reported, never resolved**: both versions are
+  left alone and the note is recorded. `PUT` returns 409 with the stored state
+  so a client can tell it lost a race, and a path collision is translated from a
+  PostgreSQL unique-violation into that same clean 409. See
+  [0011-client-sync](decisions/0011-client-sync.md).
+- 18 client unit tests (fake HTTP handler, no network) and 6 end-to-end tests
+  against a real server and PostgreSQL, which return early when the dev stack
+  isn't running.
 ## Known Issues
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
@@ -395,4 +428,10 @@ Concretely:
 - Phase 7 (graph) is covered by tests only so far: the builder and the layout
   algorithm are unit-tested, but nothing has rendered a graph in a live shell
   run yet.
-- 145 tests pass (106 Core, 25 Data, 14 Server).
+- Phase 9 (client sync) verified live end to end: a note pushed from a temp
+  vault arrives on the server; a change made by a second device is pulled into
+  the vault file; a tombstone from another device deletes the local file; a note
+  changed on both sides is reported as **one** conflict with neither version
+  overwritten; a wrong token fails without touching the vault; syncing twice
+  sends nothing the second time. All 6 run as tests against the real stack.
+- 178 tests pass (118 Core, 34 Data, 26 Server).

@@ -1,5 +1,5 @@
 using MdBolsa.Server.Endpoints;
-using MdBolsa.Server.Notes;
+using MdBolsa.Contracts;
 
 namespace MdBolsa.Server.Tests;
 

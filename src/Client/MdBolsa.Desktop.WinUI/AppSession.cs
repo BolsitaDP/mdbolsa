@@ -1,5 +1,6 @@
 using MdBolsa.Data.Links;
 using MdBolsa.Data.Search;
+using MdBolsa.Data.Sync;
 using MdBolsa.Data.Tags;
 using MdBolsa.Data.Vault;
 using Windows.Storage;
@@ -62,4 +63,53 @@ internal static class AppSession
     public static SqliteSearchIndex OpenSearchIndex() => new(DatabasePath);
 
     public static SqliteTagIndex OpenTagIndex() => new(DatabasePath);
+
+    public static SqliteSyncStateStore OpenSyncStateStore() => new(DatabasePath);
+
+    // --- Sync identity and connection ------------------------------------
+    //
+    // The device id is per *machine*, not per vault, so it lives in the app's
+    // settings store rather than in the per-vault SQLite index. It's created once
+    // and never rotated: it is how the server records who wrote last.
+
+    private const string DeviceIdKey = "MdBolsa.DeviceId";
+    private const string ServerUrlKey = "MdBolsa.ServerUrl";
+    private const string ServerTokenKey = "MdBolsa.ServerToken";
+
+    public static Guid DeviceId
+    {
+        get
+        {
+            if (ApplicationData.Current.LocalSettings.Values.TryGetValue(DeviceIdKey, out var value) &&
+                value is string stored && Guid.TryParse(stored, out var id))
+            {
+                return id;
+            }
+
+            var created = Guid.NewGuid();
+            ApplicationData.Current.LocalSettings.Values[DeviceIdKey] = created.ToString();
+            return created;
+        }
+    }
+
+    public static string? ServerUrl
+    {
+        get => ReadSetting(ServerUrlKey);
+        set => WriteSetting(ServerUrlKey, value);
+    }
+
+    public static string? ServerToken
+    {
+        get => ReadSetting(ServerTokenKey);
+        set => WriteSetting(ServerTokenKey, value);
+    }
+
+    private static string? ReadSetting(string key) =>
+        ApplicationData.Current.LocalSettings.Values.TryGetValue(key, out var value) ? value as string : null;
+
+    private static void WriteSetting(string key, string? value)
+    {
+        if (value is null) ApplicationData.Current.LocalSettings.Values.Remove(key);
+        else ApplicationData.Current.LocalSettings.Values[key] = value;
+    }
 }

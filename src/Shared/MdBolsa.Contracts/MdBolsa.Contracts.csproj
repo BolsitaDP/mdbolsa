@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      The sync wire contract, referenced by BOTH MdBolsa.Server and
+      MdBolsa.Core. It has no dependencies and knows nothing about either side:
+      just the shapes that travel over HTTP, plus the header names.
+
+      This exists because the server's DTOs were its own (see
+      docs/decisions/0010-server-foundation.md) - fine until the client starts
+      speaking to the server, at which point two hand-written copies of the same
+      record is exactly the kind of drift that only shows up in production.
+      DTOs only: no logic, no dependencies, no generated code.
+    -->
+  </PropertyGroup>
+
+</Project>

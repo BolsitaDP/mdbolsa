@@ -10,17 +10,21 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
-**Phase 8 - Server foundation.** The client is unchanged from Phase 7. Added
-now: `MdBolsa.Server`, an ASP.NET Core API over PostgreSQL that stores notes
-with the sync metadata Phase 9 needs (`id`, `content_hash`, `revision`,
-`device_id`, `updated_at`, plus tombstones for deletions) and answers
-"everything that changed since X" incrementally. The client doesn't talk to it
-yet; that's Phase 9. **The API has no authentication** - an explicit, temporary
+**Phase 9 - Client sync.** The desktop app and the server now talk to each
+other. Press **Sync** and the vault goes both ways: notes changed here are
+pushed, notes changed on another device are pulled into your files, a deletion
+on another device removes the file, and a note changed in *both* places is
+reported as a conflict with neither version overwritten (resolving those is the
+next phase). Configure it once with **Sync settings...** - server URL and the
+shared token. Writing a note never touches the network, so typing never waits on
+sync. See [docs/synchronization.md](docs/synchronization.md).
+
+**Phase 8 - Server foundation.** `MdBolsa.Server`: an ASP.NET Core API over
+PostgreSQL storing notes with the sync metadata this needs. The client doesn't
+speak to it until Phase 9. **No authentication** - an explicit, temporary
 decision, see [0010](docs/decisions/0010-server-foundation.md) - so it binds to
-localhost only. To run it: `docker compose up -d`, then
-`dotnet run --project src/Server/MdBolsa.Server`. See
-[docs/deployment.md](docs/deployment.md) and
-[docs/synchronization.md](docs/synchronization.md).
+localhost only, and in Production it refuses to start without a token. See
+[docs/deployment.md](docs/deployment.md).
 
 Earlier phases: the WinUI shell opens a vault (Windows folder picker, choice
 remembered), lists its notes, lets you open/edit/save one as plain Markdown text
@@ -33,7 +37,6 @@ notes on right-click. Phase 3's editor was blocked for a while by a WindowsAppSD
 crashes are documented in docs/architecture.md's Known Issues - read it before
 adding UI, because this runtime is unforgiving. See
 [docs/vision.md 17](docs/vision.md#17-phased-roadmap) for the full roadmap.
-
 ## Running it
 
 Double-click **`mdbolsa.lnk`** on the desktop: it rebuilds and launches the
@@ -48,6 +51,7 @@ docs/                       Vision, architecture, dev/deploy/sync docs, ADRs
 src/Client/MdBolsa.Core/     Domain logic, parsing, indexing (platform-agnostic)
 src/Client/MdBolsa.Data/     SQLite-backed storage (platform-agnostic)
 src/Client/MdBolsa.Desktop.WinUI/  WinUI 3 shell
+src/Shared/MdBolsa.Contracts/ Sync wire contract, shared by client and server
 src/Server/MdBolsa.Server/   ASP.NET Core sync/storage API (Phase 8)
 tests/                       Unit tests for Core, Data and Server
 samples/dev-vault/           Fake vault used as the Development default

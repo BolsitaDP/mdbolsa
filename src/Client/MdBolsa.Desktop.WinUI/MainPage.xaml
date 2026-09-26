@@ -23,6 +23,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -31,18 +32,37 @@
             <Button x:Name="BrowseVaultButton" Content="Browse..." Click="OnBrowseVaultClicked" />
             <Button x:Name="OpenVaultButton" Content="Open vault" Click="OnOpenVaultClicked" />
             <Button x:Name="GraphButton" Content="Graph" Click="OnGraphClicked" />
+            <Button x:Name="SyncButton" Content="Sync" Click="OnSyncClicked" />
+            <Button x:Name="SyncSettingsButton" Content="Sync settings..." Click="OnSyncSettingsClicked" />
         </StackPanel>
 
-        <TextBlock x:Name="StatusText" Grid.Row="1" Margin="0,8,0,8" Opacity="0.7"
+        <!--
+            Sync settings live inline in the page rather than in a dialog: opening
+            any XAML popup crashes this build of the Windows App Runtime (see
+            docs/architecture.md's Known Issues).
+        -->
+        <Grid Grid.Row="1" x:Name="SyncSettingsPanel" Visibility="Collapsed" ColumnSpacing="12" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Server URL" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <TextBox x:Name="SyncServerBox" Grid.Column="1" PlaceholderText="http://localhost:5080" />
+            <PasswordBox x:Name="SyncTokenBox" Grid.Column="2" PlaceholderText="Sync token" />
+            <Button Grid.Column="3" Content="Save" Click="OnSaveSyncSettingsClicked" />
+        </Grid>
+        <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,8" Opacity="0.7"
                    Text="Enter a vault folder path above, then click Open vault." />
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
             <TextBox x:Name="SearchBox" Width="300" PlaceholderText="Search notes" />
             <Button x:Name="SearchButton" Content="Search" Click="OnSearchClicked" />
             <Button x:Name="ClearSearchButton" Content="Show all notes" Click="OnClearSearchClicked" />
         </StackPanel>
 
-        <Grid Grid.Row="3" ColumnSpacing="16">
+        <Grid Grid.Row="4" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="260" />
                 <ColumnDefinition Width="*" />
