@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" ?>
 <Application
     x:Class="MdBolsa_Desktop_WinUI.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -8,9 +8,115 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
-                <!-- Other merged dictionaries here -->
             </ResourceDictionary.MergedDictionaries>
-            <!-- Other app resources here -->
+
+            <!--
+                The icon buttons: the ribbon, and the three buttons in the vault header.
+                The default Button style draws a filled rounded rectangle, which is
+                right for "Save" and wrong for everything else - a strip of filled
+                rectangles down the left edge looks like a toolbar from 2005, not like
+                a tool someone uses all day.
+
+                So these are borderless and transparent, and they deliberately keep the
+                framework's own control template. A hand-written template for them was
+                tried and reliably took the process down (STATUS_STOWED_EXCEPTION,
+                0xc000027b, in Microsoft.UI.Xaml.dll) the moment the icon content
+                started rendering through it. The framework template is better tested
+                than anything written here, and the row style below - whose content is
+                text, and which works - shows the same look with less risk.
+            -->
+            <Style x:Key="IconButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="8" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+
+            <!--
+                Sidebar rows: a note or a folder in the tree, a search result, a
+                backlink, a tag. All of them are "a line you click to go somewhere",
+                so they get the same shape - full width, left-aligned, compact, with
+                a rounded hover and a tinted selection. The selection tint is the
+                accent at 20%, which is what makes the current note findable at a
+                glance without shouting.
+            -->
+            <Style x:Key="SidebarRowStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="8,5,8,5" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="4">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation
+                                                    Storyboard.TargetName="Root"
+                                                    Storyboard.TargetProperty="Background"
+                                                    To="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                    Duration="0:0:0.1" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation
+                                                    Storyboard.TargetName="Root"
+                                                    Storyboard.TargetProperty="Opacity"
+                                                    To="0.6" Duration="0:0:0.05" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter
+                                    Padding="{TemplateBinding Padding}"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <!--
+                The selected row is the same style with the accent tint behind it.
+                A selected state as a *style* rather than a Background set in code,
+                because a theme brush cannot be looked up from
+                Application.Current.Resources - only what the app declares itself is
+                reachable from there. Themes win in the XAML, where they belong.
+            -->
+            <Style x:Key="SidebarRowSelectedStyle" TargetType="Button" BasedOn="{StaticResource SidebarRowStyle}">
+                <Setter Property="Background" Value="{ThemeResource AccentFillColorSecondaryBrush}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+
+            <Style x:Key="ConflictCardStyle" TargetType="Border">
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="10,8,10,8" />
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+
+            <!--
+                One hard-coded grey in the whole app, for the folder chevrons the tree
+                draws in code. It is a 12-pixel triangle that has to be legible
+                against both a white sidebar and a near-black one, and the two theme
+                greys that would be right in each case cannot be read from code (see
+                above), so it picks a middle value that works in both.
+            -->
+            <SolidColorBrush x:Key="ChevronBrush" Color="#7A7A7A" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

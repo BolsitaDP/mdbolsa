@@ -10,6 +10,22 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
+**A new shell, shaped like Obsidian's.** The window is now a narrow icon ribbon,
+the vault as a folder tree on the left, the note in the middle, the note's tags,
+backlinks and metadata on the right, and a status bar along the bottom - with
+`Ctrl+F` to search, `Ctrl+S` to save, `Ctrl+B` / `Ctrl+I` to fold the sidebars
+away, and `Ctrl+G` for the graph. The point of copying a layout people already
+know is that nothing here needs explaining. Colours come from the system theme, so
+it is right in light and dark.
+
+What is *not* changed: every note is still a plain `.md` file you own, and the
+editor is still a plain-text editor (Obsidian renders Markdown; we don't yet -
+that is a phase of its own).
+
+See [docs/architecture.md](docs/architecture.md#the-shell-obsidian-shaped) for how
+it's put together, and the Known Issues there before adding UI - this runtime is
+unforgiving, and the redesign found two more ways to crash it.
+
 **Phase 10 - Conflicts and version history.** When a note is changed in two
 places, the app now shows you both and asks - no version is merged or discarded
 behind your back. The server keeps **every** accepted revision, so the version

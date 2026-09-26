@@ -10,42 +10,43 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using System.Runtime.InteropServices;
+using Windows.Foundation;
 using Windows.System;
+using PathShape = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace MdBolsa_Desktop_WinUI;
 
-// Phase 3 editor + Phase 4 backlinks + Phase 5 search + Phase 6 tags/metadata:
-// open a vault, browse, search or filter its notes by tag, edit one as plain
-// Markdown text, save it (explicitly via SaveButton, or implicitly when
-// switching notes/vaults), and see its tags, metadata and backlinks.
+// The shell: an Obsidian-shaped window around a folder of Markdown files. Open a
+// vault, see it as a folder tree, open a note, edit it as plain text, and see
+// what else in the vault points at it.
 //
-// Saving used to crash natively on this machine's WindowsAppSDK 2.4.0 (preview) build -
-// reading Editor.Text back (the getter) triggered a STATUS_STOWED_EXCEPTION, reproduced
-// with a no-op TextChanged handler, a polling DispatcherQueueTimer, GetValue instead of
-// .Text, and RichEditBox.Document instead of TextBox (see docs/architecture.md's Known
-// Issues section for the full isolation notes). Normalizing line endings before writing
-// and hardening SqliteVaultIndex.Upsert against a stale path/id row (both below) is what
-// was tried next, on a theory that the "crash" was actually an uncaught SqliteException
-// getting misreported - that theory doesn't fully square with the isolation notes (which
-// include a crash with a literally empty, no-op event handler touching neither the
-// filesystem nor SQLite), but empirically, saving no longer crashes with these changes
-// in place. Root cause still not confidently identified. Verified live: opening a note,
-// typing a real edit, and clicking Save works and round-trips correctly on disk.
+// The layout is a deliberate imitation: a narrow icon ribbon, the file tree on
+// the left, the note in the middle, the note's context on the right, a status bar
+// along the bottom, and Ctrl+F / Ctrl+S / Ctrl+B / Ctrl+I. None of that is
+// original, and that is the point - a tool people use all day should be one they
+// already know how to drive. What is ours is the tree, the backlinks, the tags
+// and the sync, and the fact that every byte of it is a .md file they own.
 //
-// Search deliberately has no live-as-you-type filtering: it's a button click, like
-// every other action here, rather than a TextChanged-driven update - staying well away
-// from anything resembling the pattern implicated above, even though TextChanged itself
-// was never conclusively proven to be the (sole) cause.
+// What is deliberately *not* here: any XAML popup. MenuFlyout, ContextFlyout and
+// ContentDialog all crash this build of the Windows App Runtime with a stowed
+// native exception, so right-click renames inline, sync settings are an inline
+// panel, and the sidebar swaps views instead of opening menus. See
+// docs/architecture.md's Known Issues before adding UI.
 //
-// Phase 6 follows the same rule for the tag panel: clicking a tag button filters the
-// notes list, clicking the same tag again clears it. Tag filtering and search are
-// mutually exclusive views of the notes list (searching clears an active tag filter and
-// says so) rather than a combined query, which keeps the state machine to one variable.
+// The editor is plain text, not a rendered Markdown view. Obsidian renders; we
+// don't yet (that's a phase of its own), so the middle of the window is a
+// monospace text box - which is at least honest about what you're editing.
 public sealed partial class MainPage : Page
 {
     private string? _currentRelativePath;
     private string? _activeTag;
+    private string? _activeQuery;
     private Dictionary<Guid, NoteMetadata> _notesById = new();
+
+    // Folders the user has folded shut, by full folder path. In memory for the
+    // session: persisting it is a nicety, and a wrong remembered state is worse
+    // than an open folder.
+    private readonly HashSet<string> _collapsedFolders = new(StringComparer.OrdinalIgnoreCase);
 
     public MainPage()
     {
@@ -55,16 +56,15 @@ public sealed partial class MainPage : Page
     }
 
     // Reopens the last vault on startup, so the common case is zero clicks. Guarded
-    // on VaultPath being null, because Loaded also fires when navigating back from
-    // the graph page - the vault is still open then, and rescanning it again would
+    // on VaultPath being null, because Loaded also fires when coming back from the
+    // graph view - the vault is still open then, and rescanning it again would
     // throw away the tag filter for no reason.
     //
     // The whole thing is deferred to the next dispatcher cycle, and that is not
-    // cosmetic: doing it inline (setting VaultPathBox.Text and rescanning) reliably
-    // reproduced the native STATUS_STOWED_EXCEPTION crash documented in
-    // docs/architecture.md's Known Issues - 0xc000027b in Microsoft.UI.Xaml.dll -
-    // because mutating a control while the tree is still handling Loaded is
-    // re-entrant. Same reason ShowAndEditNote defers Editor.Text.
+    // cosmetic: mutating controls while the tree is still handling Loaded is
+    // re-entrant and reliably reproduced the native STATUS_STOWED_EXCEPTION crash
+    // documented in docs/architecture.md's Known Issues (0xc000027b in
+    // Microsoft.UI.Xaml.dll). Same reason ShowAndEditNote defers Editor.Text.
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         if (AppSession.VaultPath is not null) return;
@@ -74,32 +74,27 @@ public sealed partial class MainPage : Page
 
         DispatcherQueue.TryEnqueue(() =>
         {
-            VaultPathBox.Text = remembered;
-
             if (Directory.Exists(remembered))
             {
                 OpenVault(remembered);
             }
             else
             {
-                StatusText.Text = $"Last vault is not there anymore: {remembered}. Pick another one with Browse.";
+                StatusText.Text = $"Last vault is not there anymore: {remembered}. Use the folder button to pick another.";
             }
         });
     }
 
-    private void OnOpenVaultClicked(object sender, RoutedEventArgs e) => OpenVault(VaultPathBox.Text.Trim());
+    // --- Vault --------------------------------------------------------------
 
     // Windows' own folder picker, rather than making the user find and paste a path.
     //
     // This is Microsoft.Windows.Storage.Pickers.FolderPicker, not the UWP
     // Windows.Storage.Pickers one: the desktop picker takes the window id in its
-    // constructor, while the UWP picker has no way to be told which window owns
-    // the dialog and simply never shows one (verified: it hangs on
-    // PickSingleFolderAsync with no dialog and no exception, which is why the
-    // earlier status-bar error was all we ever saw).
-    //
-    // The chosen path is passed straight to OpenVault instead of being read back
-    // out of the text box - no reason to round-trip a value we just set ourselves.
+    // constructor, while the UWP picker has no way to be told which window owns the
+    // dialog and simply never shows one (verified: it hangs on PickSingleFolderAsync
+    // with no dialog and no exception, which is why the earlier status-bar error was
+    // all we ever saw).
     private async void OnBrowseVaultClicked(object sender, RoutedEventArgs e)
     {
         try
@@ -116,7 +111,6 @@ public sealed partial class MainPage : Page
             var folder = await picker.PickSingleFolderAsync();
             if (folder is null) return; // cancelled
 
-            VaultPathBox.Text = folder.Path;
             OpenVault(folder.Path);
         }
         catch (Exception ex) when (ex is COMException or UnauthorizedAccessException or InvalidOperationException)
@@ -127,20 +121,31 @@ public sealed partial class MainPage : Page
 
     private void OpenVault(string path)
     {
-        SaveCurrentNote();
-        _currentRelativePath = null;
-        _activeTag = null;
-
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
         {
-            StatusText.Text = "Pick a vault folder with Browse..., or type a path, then click Open vault.";
+            StatusText.Text = "That folder isn't there. Use the folder button to pick your vault.";
             return;
         }
 
+        SaveCurrentNote();
+        _currentRelativePath = null;
+        _activeTag = null;
+        _activeQuery = null;
+        SearchBox.Text = string.Empty;
+
         AppSession.VaultPath = path;
         AppSession.RememberVaultPath(path);
+        VaultNameText.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
+        ToolTipService.SetToolTip(VaultNameText, path);
+
+        ShowTree();
         RescanAndRefreshList();
     }
+
+    // A local-first app does not own the folder: someone can drop a file in, or
+    // sync something in, while the app is open. Rescanning is cheap and this is
+    // the button that makes that recoverable without restarting.
+    private void OnRescanClicked(object sender, RoutedEventArgs e) => RescanAndRefreshList();
 
     private void OnNewNoteClicked(object sender, RoutedEventArgs e)
     {
@@ -165,21 +170,449 @@ public sealed partial class MainPage : Page
 
     private void OnSaveClicked(object sender, RoutedEventArgs e) => SaveCurrentNote();
 
+    // --- Keyboard shortcuts -------------------------------------------------
+
+    // The shortcuts are KeyboardAccelerators declared in the XAML rather than a
+    // KeyDown handler, for two reasons: the framework does the modifier test (and
+    // works out which physical Ctrl was pressed), and an accelerator fires for a
+    // focused control *and* still routes, so Ctrl+S works with the cursor in the
+    // editor, which is where you will be when you want to save.
+    private void OnSaveAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        SaveCurrentNote();
+
+    private void OnFindAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        FocusSearch();
+
+    // Ctrl+P is Obsidian's quick switcher. There isn't one yet, and sending it to
+    // search is the nearest honest thing: both are "type a name, go there".
+    private void OnQuickSwitcherAccelerator(
+        KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        FocusSearch();
+
+    private void OnToggleLeftAccelerator(
+        KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        ToggleLeftSidebar();
+
+    private void OnToggleRightAccelerator(
+        KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        ToggleRightSidebar();
+
+    private void OnGraphAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        ShowGraph();
+
+    private void FocusSearch()
+    {
+        if (LeftSidebar.Visibility != Visibility.Visible) ToggleLeftSidebar();
+        SearchBox.Focus(FocusState.Programmatic);
+        SearchBox.SelectAll();
+    }
+    // A right-pointing triangle, built in code because a Path's Data is a Geometry
+    // and there is no string converter to lean on outside XAML. The chevron is
+    // rotated rather than swapped between two shapes so the rotation is smooth.
+    private static Geometry ChevronGeometry()
+    {
+        var figure = new PathFigure
+        {
+            StartPoint = new Point(3, 2),
+            IsClosed = true,
+            IsFilled = true,
+        };
+        figure.Segments.Add(new LineSegment { Point = new Point(9, 6) });
+        figure.Segments.Add(new LineSegment { Point = new Point(3, 10) });
+
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        return geometry;
+    }
+
+
+    // --- Sidebar views ------------------------------------------------------
+
+    // The sidebar shows one of four things - the tree, a search or tag result, the
+    // sync settings, or the conflicts - and switches between them. Only one is
+    // visible at a time, which is why nothing here has to agree about space.
+    private void ShowSidebarView(UIElement? view)
+    {
+        foreach (var candidate in new UIElement?[] { TreeList, FlatListPanel, SyncSettingsPanel, ConflictsPanel })
+        {
+            if (candidate is null) continue;
+            candidate.Visibility = ReferenceEquals(candidate, view) ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void ShowTree()
+    {
+        _activeQuery = null;
+        _activeTag = null;
+        RenderTree();
+        ShowSidebarView(TreeList);
+    }
+
+    private void OnNotesRibbonClicked(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = string.Empty;
+        PopulateTagsPanel();
+        ShowTree();
+    }
+
+    private void OnToggleLeftSidebarClicked(object sender, RoutedEventArgs e) => ToggleLeftSidebar();
+
+    private void ToggleLeftSidebar()
+    {
+        var hiding = LeftSidebar.Visibility == Visibility.Visible;
+        LeftSidebar.Visibility = hiding ? Visibility.Collapsed : Visibility.Visible;
+        ToolTipService.SetToolTip(
+            ToggleLeftSidebarButton,
+            hiding ? "Show the file list (Ctrl+B)" : "Hide the file list (Ctrl+B)");
+    }
+
+    private void OnToggleRightSidebarClicked(object sender, RoutedEventArgs e) => ToggleRightSidebar();
+
+    private void ToggleRightSidebar()
+    {
+        var hiding = RightSidebar.Visibility == Visibility.Visible;
+        RightSidebar.Visibility = hiding ? Visibility.Collapsed : Visibility.Visible;
+        ToolTipService.SetToolTip(
+            ToggleRightSidebarButton,
+            hiding ? "Show note details (Ctrl+I)" : "Hide note details (Ctrl+I)");
+    }
+
+    // The vault as a folder tree, rendered flat with one row per node and an
+    // indent per level. A flat list rather than nested TreeViews because the rows
+    // have to be swappable in and out for the inline rename, which means each row
+    // has to be a direct child of the panel that holds it - and because a vault of
+    // personal notes is hundreds of rows, not hundreds of thousands.
+    private void RenderTree()
+    {
+        TreeList.Children.Clear();
+        if (AppSession.VaultPath is null) return;
+
+        var tree = VaultTree.Build(_notesById.Values);
+        AddTreeRows(TreeList, tree, depth: 0, folderPath: string.Empty);
+
+        StatusDetailText.Text = $"{_notesById.Count} notes";
+    }
+
+    private void AddTreeRows(Panel panel, IReadOnlyList<VaultTreeNode> nodes, int depth, string folderPath)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.IsFolder)
+            {
+                var childPath = folderPath.Length == 0 ? node.Name : $"{folderPath}/{node.Name}";
+                var collapsed = _collapsedFolders.Contains(childPath);
+
+                var folderRow = new Button
+                {
+                    Style = (Style)Application.Current.Resources["SidebarRowStyle"],
+                    Margin = new Thickness(0, 1, 0, 1),
+                    Content = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 6,
+                        Children =
+                        {
+                            new Grid
+                            {
+                                Width = 12,
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Children =
+                                {
+                                    // A chevron that points right when folded, down when
+                                    // open. Drawn rather than typed so it can rotate.
+                                    new PathShape
+                                    {
+                                        Data = ChevronGeometry(),
+                                        RenderTransform = new RotateTransform
+                                        {
+                                            // 0 points right (folded), 90 points down (open).
+                                            Angle = collapsed ? 0 : 90,
+                                            CenterX = 6,
+                                            CenterY = 6,
+                                        },
+                                        Fill = (Brush)Application.Current.Resources["ChevronBrush"],
+                                    },
+                                },
+                            },
+                            new TextBlock
+                            {
+                                Text = node.Name,
+                                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                FontSize = 13,
+                                VerticalAlignment = VerticalAlignment.Center,
+                            },
+                        },
+                    },
+                };
+
+                var captured = childPath;
+                folderRow.Click += (_, _) =>
+                {
+                    if (!_collapsedFolders.Remove(captured)) _collapsedFolders.Add(captured);
+                    RenderTree();
+                };
+
+                panel.Children.Add(folderRow);
+
+                // A collapsed folder's children aren't built at all, which is what
+                // keeps a big vault from creating a control per hidden row.
+                if (!collapsed) AddTreeRows(panel, node.Children, depth + 1, childPath);
+                continue;
+            }
+
+            var relativePath = node.RelativePath!;
+            var isOpen = relativePath == _currentRelativePath;
+
+            var noteRow = new Button
+            {
+                Style = (Style)Application.Current.Resources[
+                    isOpen ? "SidebarRowSelectedStyle" : "SidebarRowStyle"],
+                Margin = new Thickness(4 + depth * 14, 1, 0, 1),
+                Content = new TextBlock
+                {
+                    Text = node.Name,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+
+
+            var path = relativePath;
+            noteRow.Click += (_, _) => ShowAndEditNote(path);
+            AddNoteContextMenu(noteRow, path);
+            panel.Children.Add(noteRow);
+        }
+    }
+
+    // --- Search and tags ----------------------------------------------------
+
+    // Search is applied on Enter, never on every keystroke. Live filtering means
+    // rebuilding a list of controls from inside a TextChanged handler, and this
+    // app's crash history (docs/architecture.md) makes anything that mutates
+    // controls from a text input's own event a thing to avoid on purpose rather
+    // than by luck.
+    private void OnSearchBoxKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter) return;
+        e.Handled = true;
+        RunSearch();
+    }
+
+
+
+    private void RunSearch()
+    {
+        if (AppSession.VaultPath is null)
+        {
+            StatusText.Text = "Open a vault first.";
+            return;
+        }
+
+        var query = SearchBox.Text.Trim();
+        if (query.Length == 0)
+        {
+            OnClearSearchClicked(this, new RoutedEventArgs());
+            return;
+        }
+
+        // Searching and tag-filtering are two views of the same panel, not a
+        // combined query, which keeps the state to one variable and the panel to
+        // one list.
+        var clearedTag = _activeTag is not null;
+        _activeTag = null;
+        _activeQuery = query;
+        PopulateTagsPanel();
+
+        var results = AppSession.OpenSearchIndex().Search(query);
+        var notes = results
+            .Select(result => _notesById.GetValueOrDefault(result.NoteId))
+            .Where(note => note is not null)
+            .Select(note => note!)
+            .ToList();
+
+        StatusText.Text = $"{notes.Count} result(s) for \"{query}\"." +
+            (clearedTag ? " Tag filter cleared." : string.Empty);
+
+        PopulateFlatList(notes, snippetFor: query, header: $"SEARCH  \"{query}\"  ·  {notes.Count} match(es)");
+        ShowSidebarView(FlatListPanel);
+    }
+
+    private void OnClearSearchClicked(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = string.Empty;
+        ShowTree();
+        StatusText.Text = $"Showing all {_notesById.Count} note(s).";
+    }
+
+    // Tag buttons are built in code, so this is called from the click handler
+    // rather than wired up in XAML.
+    private void OnTagClicked(string tag)
+    {
+        _activeTag = _activeTag == tag ? null : tag;
+        _activeQuery = null;
+        PopulateTagsPanel();
+
+        if (_activeTag is null)
+        {
+            ShowTree();
+            StatusText.Text = $"Showing all {_notesById.Count} note(s).";
+            return;
+        }
+
+        var tagged = AppSession.OpenTagIndex().GetNoteIdsForTag(_activeTag).ToHashSet();
+        var notes = _notesById.Values
+            .Where(note => tagged.Contains(note.Id))
+            .OrderBy(note => note.RelativePath)
+            .ToList();
+
+        PopulateFlatList(notes, snippetFor: null, header: $"#{_activeTag}  ·  {notes.Count} note(s)");
+        ShowSidebarView(FlatListPanel);
+        StatusText.Text = $"Filtering by #{_activeTag}. Click the tag again to clear.";
+    }
+
+    // One row list, used by search results, tag results and backlinks. Snippet is
+    // the matched line for search and nothing for the others, so a result says why
+    // it matched when there is a "why".
+    private void PopulateFlatList(
+        IReadOnlyList<NoteMetadata> notes, string? snippetFor, string header)
+    {
+        NotesList.Children.Clear();
+        FlatListHeader.Text = header;
+
+        if (notes.Count == 0)
+        {
+            NotesList.Children.Add(new TextBlock
+            {
+                Text = "Nothing here.",
+                Opacity = 0.6,
+                FontSize = 12,
+                Margin = new Thickness(8, 4, 0, 0),
+            });
+            return;
+        }
+
+        foreach (var note in notes)
+        {
+            var content = new StackPanel { Spacing = 1 };
+            content.Children.Add(new TextBlock
+            {
+                Text = Path.GetFileNameWithoutExtension(note.RelativePath),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+
+            if (snippetFor is not null)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = SnippetFor(note, snippetFor),
+                    FontSize = 11,
+                    Opacity = 0.65,
+                    MaxLines = 2,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+            }
+
+            var button = new Button
+            {
+                Style = (Style)Application.Current.Resources["SidebarRowStyle"],
+                Content = content,
+            };
+            ToolTipService.SetToolTip(button, note.RelativePath);
+
+            var path = note.RelativePath;
+            button.Click += (_, _) => ShowAndEditNote(path);
+            AddNoteContextMenu(button, path);
+            NotesList.Children.Add(button);
+        }
+    }
+
+    // The line a note matched on, with the match marked by its position rather than
+    // by markup - the sidebar has no room for formatting, and the line itself is
+    // usually enough to recognise the note.
+    private string SnippetFor(NoteMetadata note, string query)
+    {
+        if (AppSession.VaultPath is null) return string.Empty;
+
+        try
+        {
+            var content = File.ReadAllText(ResolvePath(note.RelativePath));
+            var line = content
+                .Split('\n')
+                .FirstOrDefault(candidate =>
+                    candidate.Contains(query, StringComparison.OrdinalIgnoreCase));
+
+            return (line ?? content.Split('\n').FirstOrDefault(c => c.Trim().Length > 0) ?? string.Empty).Trim();
+        }
+        catch (IOException)
+        {
+            return string.Empty;
+        }
+    }
+
+    // Read-only view of the tags in the vault. A vertical list, not a wrap panel:
+    // tags are clickable filters, and a clickable pill that reflows as you type
+    // them is a misclick waiting to happen.
+    private void PopulateTagsPanel()
+    {
+        TagsList.Children.Clear();
+
+        if (AppSession.VaultPath is null)
+        {
+            TagsHeaderText.Text = "TAGS";
+            return;
+        }
+
+        var tagCounts = AppSession.OpenTagIndex().GetTagCounts();
+
+        TagsHeaderText.Text = tagCounts.Count == 0
+            ? "TAGS  ·  none yet"
+            : _activeTag is not null
+                ? $"TAGS  ·  showing #{_activeTag}"
+                : $"TAGS  ·  {tagCounts.Count}";
+
+        foreach (var tagCount in tagCounts)
+        {
+            var tag = tagCount.Tag;
+
+            var button = new Button
+            {
+                Style = (Style)Application.Current.Resources["SidebarRowStyle"],
+                Content = new TextBlock
+                {
+                    Text = $"#{tag}  ({tagCount.NoteCount})",
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                },
+            };
+
+            // The active tag is tinted, so it's obvious which filter is on without
+            // reading the status line.
+            if (_activeTag == tag)
+            {
+                button.Style = (Style)Application.Current.Resources["SidebarRowSelectedStyle"];
+            }
+
+            button.Click += (_, _) => OnTagClicked(tag);
+            TagsList.Children.Add(button);
+        }
+    }
+
     // --- Sync (Phase 9) ----------------------------------------------------
 
-    // Sync settings are edited inline (no dialog - popups crash this runtime).
-    private void OnSyncSettingsClicked(object sender, RoutedEventArgs e)
+    private void OnSyncRibbonClicked(object sender, RoutedEventArgs e) => _ = SyncNowAsync();
+
+    // Sync settings are edited inline: no dialogs on this runtime.
+    private void OnSyncSettingsRibbonClicked(object sender, RoutedEventArgs e)
     {
-        var showing = SyncSettingsPanel.Visibility == Visibility.Visible;
-        if (showing)
+        if (SyncSettingsPanel.Visibility == Visibility.Visible)
         {
-            SyncSettingsPanel.Visibility = Visibility.Collapsed;
+            ShowTree();
             return;
         }
 
         SyncServerBox.Text = AppSession.ServerUrl ?? string.Empty;
         SyncTokenBox.Password = AppSession.ServerToken ?? string.Empty;
-        SyncSettingsPanel.Visibility = Visibility.Visible;
+        ShowSidebarView(SyncSettingsPanel);
     }
 
     private void OnSaveSyncSettingsClicked(object sender, RoutedEventArgs e)
@@ -195,14 +628,14 @@ public sealed partial class MainPage : Page
 
         AppSession.ServerUrl = url.Length == 0 ? null : url;
         AppSession.ServerToken = SyncTokenBox.Password.Length == 0 ? null : SyncTokenBox.Password;
-        SyncSettingsPanel.Visibility = Visibility.Collapsed;
 
+        ShowTree();
         StatusText.Text = AppSession.ServerUrl is null
-            ? "Sync is not configured. Press Sync settings... to set a server."
+            ? "Sync is not configured. The sliders button in the ribbon sets a server."
             : $"Sync configured for {AppSession.ServerUrl} (device {AppSession.DeviceId.ToString()[..8]}).";
     }
 
-    private async void OnSyncClicked(object sender, RoutedEventArgs e)
+    private async Task SyncNowAsync()
     {
         if (AppSession.VaultPath is null)
         {
@@ -216,14 +649,14 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        SyncButton.IsEnabled = false;
-        SyncButton.Content = "Syncing...";
+        SyncRibbonButton.IsEnabled = false;
+        StatusText.Text = "Syncing...";
 
         try
         {
-            // The local indexes have to be current *before* the sync: the push
-            // side works from the note list, and a note saved since the last scan
-            // would otherwise not be offered to the server.
+            // The local indexes have to be current *before* the sync: the push side
+            // works from the note list, and a note saved since the last scan would
+            // otherwise not be offered to the server.
             RescanAndRefreshList();
 
             var result = await client.SyncAsync(AppSession.VaultPath);
@@ -242,15 +675,16 @@ public sealed partial class MainPage : Page
             StatusText.Text = conflicts.Count == 0
                 ? $"Synced: {result.Pulled} pulled, {result.Pushed} pushed, {result.Deleted} deleted."
                 : $"Synced: {result.Pulled} pulled, {result.Pushed} pushed, {result.Deleted} deleted. " +
-                  $"{conflicts.Count} conflict(s) changed in two places - nothing was overwritten: " +
-                  string.Join("; ", conflicts.Take(3).Select(c => c.ToString()));
+                  $"{conflicts.Count} note(s) changed in two places - nothing was overwritten. " +
+                  "The warning button in the ribbon lists them.";
         }
         finally
         {
-            SyncButton.IsEnabled = true;
-            SyncButton.Content = "Sync";
+            SyncRibbonButton.IsEnabled = true;
         }
     }
+
+
 
     private bool TryCreateSyncClient(out NoteSyncClient client, out string error)
     {
@@ -260,13 +694,13 @@ public sealed partial class MainPage : Page
         var url = AppSession.ServerUrl;
         if (string.IsNullOrWhiteSpace(url))
         {
-            error = "Sync is not configured. Press Sync settings... to set a server.";
+            error = "Sync is not configured. The sliders button in the ribbon sets a server and a token.";
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(AppSession.ServerToken))
         {
-            error = "No sync token configured. Press Sync settings... and enter the server's token.";
+            error = "No sync token configured. The sliders button in the ribbon sets one.";
             return false;
         }
 
@@ -277,8 +711,8 @@ public sealed partial class MainPage : Page
             return false;
         }
 
-        // A base address without a trailing slash makes every relative request
-        // drop its last segment, which looks like a 404 for the wrong endpoint.
+        // A base address without a trailing slash makes every relative request drop
+        // its last segment, which looks like a 404 for the wrong endpoint.
         if (!url.EndsWith('/')) baseAddress = new Uri(url + "/");
 
         var http = new HttpClient { BaseAddress = baseAddress, Timeout = TimeSpan.FromSeconds(30) };
@@ -291,16 +725,22 @@ public sealed partial class MainPage : Page
 
         return true;
     }
+
     // --- Conflicts (Phase 10) ----------------------------------------------
 
-    private void OnConflictsClicked(object sender, RoutedEventArgs e)
+    private void OnConflictsRibbonClicked(object sender, RoutedEventArgs e)
     {
-        var showing = ConflictsPanel.Visibility == Visibility.Visible;
-        ConflictsPanel.Visibility = showing ? Visibility.Collapsed : Visibility.Visible;
-        if (!showing) RenderConflicts();
+        if (ConflictsPanel.Visibility == Visibility.Visible)
+        {
+            ShowTree();
+            return;
+        }
+
+        RenderConflicts();
+        ShowSidebarView(ConflictsPanel);
     }
 
-    // One row per conflicted note, with the two choices that exist. There is no
+    // One card per conflicted note, with the two choices that exist. There is no
     // merge button, on purpose: an automatic merge of two Markdown files needs a
     // common ancestor and real diffing, and a wrong automatic merge is worse than
     // none. See docs/decisions/0012-conflict-resolution.md.
@@ -312,45 +752,52 @@ public sealed partial class MainPage : Page
         ConflictsSummaryText.Text = conflicts.Count == 0
             ? "No conflicts. Every note matches the server."
             : $"{conflicts.Count} note(s) changed in two places. Nothing has been overwritten - " +
-              "choose which version to keep for each one.";
+              "choose which version to keep.";
 
         foreach (var conflict in conflicts)
         {
-            var row = new Grid { ColumnSpacing = 8 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var body = new StackPanel { Spacing = 6 };
+            var card = new Border
+            {
+                Style = (Style)Application.Current.Resources["ConflictCardStyle"],
+                Child = body,
+            };
 
-            var name = new TextBlock
+            body.Children.Add(new TextBlock
             {
                 Text = conflict.RelativePath ?? conflict.NoteId.ToString(),
-                VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            };
-            Grid.SetColumn(name, 0);
-            row.Children.Add(name);
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            body.Children.Add(new TextBlock
+            {
+                Text = $"yours rev {conflict.LocalRevision} · theirs rev {conflict.ServerRevision}",
+                FontSize = 11,
+                Opacity = 0.6,
+            });
 
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             var noteId = conflict.NoteId;
 
-            var keepMine = new Button { Content = "Keep mine" };
+            var keepMine = new Button { Content = "Keep mine", FontSize = 12 };
             keepMine.Click += async (_, _) => await ResolveConflictAsync(noteId, keepLocal: true);
-            Grid.SetColumn(keepMine, 1);
-            row.Children.Add(keepMine);
+            buttons.Children.Add(keepMine);
 
-            var takeTheirs = new Button { Content = "Take theirs" };
+            var takeTheirs = new Button { Content = "Take theirs", FontSize = 12 };
             takeTheirs.Click += async (_, _) => await ResolveConflictAsync(noteId, keepLocal: false);
-            Grid.SetColumn(takeTheirs, 2);
-            row.Children.Add(takeTheirs);
+            buttons.Children.Add(takeTheirs);
 
-            ConflictsList.Children.Add(row);
+            body.Children.Add(buttons);
+            ConflictsList.Children.Add(card);
         }
     }
 
     private async Task ResolveConflictAsync(Guid noteId, bool keepLocal)
     {
         if (AppSession.VaultPath is null) return;
-        if (!TryCreateSyncClient(out var client, out var error) ||
-            !TryCreateConflictResolver(out var resolver, out error))
+
+        if (!TryCreateConflictResolver(out var resolver, out var error))
         {
             StatusText.Text = error;
             return;
@@ -399,13 +846,13 @@ public sealed partial class MainPage : Page
             !Uri.TryCreate(url, UriKind.Absolute, out var baseAddress) ||
             baseAddress.Scheme is not ("http" or "https"))
         {
-            error = "No usable sync server configured. Press Sync settings... first.";
+            error = "No usable sync server configured. The sliders button in the ribbon sets one.";
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(AppSession.ServerToken))
         {
-            error = "No sync token configured. Press Sync settings... and enter the server's token.";
+            error = "No sync token configured. The sliders button in the ribbon sets one.";
             return false;
         }
 
@@ -421,14 +868,18 @@ public sealed partial class MainPage : Page
         error = string.Empty;
         return true;
     }
-    // Phase 7's graph view. It is hosted in a Frame inside this page, *not* reached
-    // by navigating the root Frame: that unloads MainPage, and unloading a page
-    // holding the Editor TextBox crashes the process natively
-    // (STATUS_STOWED_EXCEPTION, 0xc000027b) - verified by bisection, with an empty
-    // GraphPage and an empty OnLoaded, so it is the teardown and not the graph.
-    // MainContent is only hidden, so the editor is never torn down. See
-    // docs/architecture.md's Known Issues.
-    private void OnGraphClicked(object sender, RoutedEventArgs e)
+
+    // --- Graph (Phase 7) ----------------------------------------------------
+
+    // The graph lives in a Frame inside the centre column, *not* reached by
+    // navigating the root Frame: that unloads this page, and unloading a page
+    // holding the Editor TextBox crashes the process natively (STATUS_STOWED_EXCEPTION,
+    // 0xc000027b) - verified by bisection, with an empty GraphPage and an empty
+    // OnLoaded, so it is the teardown and not the graph. MainContent is only
+    // hidden, so the editor is never torn down. See docs/architecture.md.
+    private void OnGraphRibbonClicked(object sender, RoutedEventArgs e) => ShowGraph();
+
+    private void ShowGraph()
     {
         if (AppSession.VaultPath is null)
         {
@@ -452,68 +903,7 @@ public sealed partial class MainPage : Page
         GraphHost.BackStack.Clear();
     }
 
-    private void OnSearchClicked(object sender, RoutedEventArgs e)
-    {
-        if (AppSession.VaultPath is null)
-        {
-            StatusText.Text = "Open a vault first.";
-            return;
-        }
-
-        var clearedTagFilter = _activeTag is not null;
-        _activeTag = null;
-        PopulateTagsPanel();
-
-        var query = SearchBox.Text.Trim();
-        if (query.Length == 0)
-        {
-            RefreshNotesList();
-            return;
-        }
-
-        var results = AppSession.OpenSearchIndex().Search(query);
-        var clearedNote = clearedTagFilter ? " Tag filter cleared." : string.Empty;
-        StatusText.Text = $"{results.Count} search result(s) for \"{query}\".{clearedNote}";
-
-        NotesList.Children.Clear();
-        if (results.Count == 0)
-        {
-            NotesList.Children.Add(new TextBlock { Text = "No matches.", Opacity = 0.7 });
-            return;
-        }
-
-        foreach (var result in results)
-        {
-            if (!_notesById.TryGetValue(result.NoteId, out var note)) continue;
-
-            var button = new Button
-            {
-                Content = $"{note.RelativePath}\n{result.Snippet}",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-            };
-            button.Click += (_, _) => ShowAndEditNote(note.RelativePath);
-            AddNoteContextMenu(button, note.RelativePath);
-            NotesList.Children.Add(button);
-        }
-    }
-
-    private void OnClearSearchClicked(object sender, RoutedEventArgs e)
-    {
-        SearchBox.Text = string.Empty;
-        _activeTag = null;
-        PopulateTagsPanel();
-        RefreshNotesList();
-    }
-
-    // Tag buttons are built in code, so this is called from the click handler
-    // rather than wired up in XAML.
-    private void OnTagClicked(string tag)
-    {
-        _activeTag = _activeTag == tag ? null : tag;
-        PopulateTagsPanel();
-        RefreshNotesList();
-    }
+    // --- Scanning and the list ---------------------------------------------
 
     private void RescanAndRefreshList()
     {
@@ -531,92 +921,69 @@ public sealed partial class MainPage : Page
         _notesById = notes.ToDictionary(n => n.Id);
 
         PopulateTagsPanel();
-        RefreshNotesList(
-            $"Notes: added {vaultResult.Added}, updated {vaultResult.Updated}, " +
-            $"moved {vaultResult.Moved}, deleted {vaultResult.Deleted}, " +
-            $"unchanged {vaultResult.Unchanged}. Links: {linkResult.Resolved} resolved, " +
-            $"{linkResult.Unresolved} unresolved. Tags: {tagResult.TaggedNotes} tagged " +
-            $"note(s), {tagResult.DistinctTags} distinct.");
+
+        // Short on purpose. This line is always on screen, so it earns its place by
+        // being scannable, not by being complete: how many notes, and whether
+        // anything needs attention. The per-scanner counts are development
+        // instrumentation and belong in a log, not in someone's peripheral vision.
+        var attention = linkResult.Unresolved > 0
+            ? $", {linkResult.Unresolved} unresolved link(s)"
+            : string.Empty;
+
+        RefreshView(
+            $"Scanned {_notesById.Count} note(s) · {vaultResult.Added} new, " +
+            $"{vaultResult.Updated} changed{attention} · " +
+            $"{tagResult.DistinctTags} tag(s).");
     }
 
-    // Rebuilds the notes list from the current view state: everything, or just the
-    // notes carrying the active tag. statusPrefix lets a scan keep its summary
-    // visible instead of being replaced by the list description.
-    private void RefreshNotesList(string? statusPrefix = null)
+    // Repaints whichever sidebar view is active, and the status line. One place,
+    // because a rescan has to refresh the tree, the tags and the status, and
+    // forgetting one of them is how a panel ends up lying about the vault.
+    private void RefreshView(string? statusPrefix = null)
     {
-        var notes = _notesById.Values.OrderBy(n => n.RelativePath).ToList();
+        var count = _notesById.Count;
 
-        string status;
-        if (_activeTag is not null)
+        if (_activeQuery is not null)
         {
-            var taggedNoteIds = AppSession.OpenTagIndex().GetNoteIdsForTag(_activeTag).ToHashSet();
-            notes = notes.Where(n => taggedNoteIds.Contains(n.Id)).ToList();
-            status = $"Filtering by #{_activeTag}: {notes.Count} note(s). Click the tag again to clear.";
+            var results = AppSession.OpenSearchIndex().Search(_activeQuery);
+            var notes = results
+                .Select(result => _notesById.GetValueOrDefault(result.NoteId))
+                .Where(note => note is not null)
+                .Select(note => note!)
+                .ToList();
+
+            PopulateFlatList(notes, _activeQuery, $"SEARCH  \"{_activeQuery}\"  ·  {notes.Count} match(es)");
+            ShowSidebarView(FlatListPanel);
+            StatusText.Text = statusPrefix is null
+                ? $"{notes.Count} result(s) for \"{_activeQuery}\"."
+                : $"{statusPrefix} {notes.Count} result(s).";
+        }
+        else if (_activeTag is not null)
+        {
+            var tagged = AppSession.OpenTagIndex().GetNoteIdsForTag(_activeTag).ToHashSet();
+            var notes = _notesById.Values
+                .Where(note => tagged.Contains(note.Id))
+                .OrderBy(note => note.RelativePath)
+                .ToList();
+
+            PopulateFlatList(notes, snippetFor: null, header: $"#{_activeTag}  ·  {notes.Count} note(s)");
+            ShowSidebarView(FlatListPanel);
+            StatusText.Text = statusPrefix is null
+                ? $"Filtering by #{_activeTag}: {notes.Count} note(s)."
+                : $"{statusPrefix} Filtering by #{_activeTag}.";
         }
         else
         {
-            status = $"Showing all {notes.Count} note(s).";
+            RenderTree();
+            ShowSidebarView(TreeList);
+            StatusText.Text = statusPrefix is null ? $"Showing all {count} note(s)." : statusPrefix;
         }
 
-        PopulateNotesList(notes);
-        StatusText.Text = statusPrefix is null ? status : $"{statusPrefix} {status}";
+        StatusDetailText.Text = $"{count} notes";
     }
 
-    private void PopulateTagsPanel()
-    {
-        TagsList.Children.Clear();
-
-        if (AppSession.VaultPath is null)
-        {
-            TagsHeaderText.Text = "No tags yet.";
-            return;
-        }
-
-        var tagCounts = AppSession.OpenTagIndex().GetTagCounts();
-        TagsHeaderText.Text = _activeTag is not null
-            ? $"Tags - showing notes tagged #{_activeTag}. Click it again to clear:"
-            : tagCounts.Count == 0
-                ? "No tags yet."
-                : $"Tags ({tagCounts.Count}):";
-
-        foreach (var tagCount in tagCounts)
-        {
-            var button = new Button
-            {
-                Content = $"#{tagCount.Tag} ({tagCount.NoteCount})",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-            };
-            var tag = tagCount.Tag;
-            button.Click += (_, _) => OnTagClicked(tag);
-            TagsList.Children.Add(button);
-        }
-    }
-
-    // Plain Buttons in a StackPanel, not a ListView - a ListView (with or without
-    // SelectionChanged/ItemClick, with or without a handler that does anything) was
-    // never actually the problem; the Editor TextBox save path was. Kept as Buttons
-    // since they're already proven stable here and are plenty for personal-vault
-    // scale; revisit if a later phase needs virtualization for very large vaults.
-    private void PopulateNotesList(IEnumerable<NoteMetadata> notes)
-    {
-        NotesList.Children.Clear();
-        foreach (var note in notes)
-        {
-            var button = new Button
-            {
-                Content = note.RelativePath,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-            };
-            button.Click += (_, _) => ShowAndEditNote(note.RelativePath);
-            AddNoteContextMenu(button, note.RelativePath);
-            NotesList.Children.Add(button);
-        }
-    }
-
-    // Right-click starts a rename on any note entry - the notes list, search results
-    // and the backlinks panel.
+    // Right-click starts a rename on any note entry - the tree, search results and
+    // the backlinks panel.
     //
     // The editing UI is an inline TextBox swapped into the row, deliberately *not* a
     // MenuFlyout/ContextFlyout popup: opening a XAML popup crashes this build of the
@@ -639,7 +1006,7 @@ public sealed partial class MainPage : Page
 
     // Swaps the note's row for a text box: Enter commits, Escape cancels, and losing
     // focus cancels too (with _renameSettled keeping the two from fighting).
-    private void BeginInlineRename(FrameworkElement row, string relativePath)
+    public void BeginInlineRename(FrameworkElement row, string relativePath)
     {
         CancelInlineRename();
 
@@ -746,8 +1113,8 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        // Drop the editor's claim on the old path before rescanning, or the next
-        // save would write the note straight back to the old filename.
+        // Drop the editor's claim on the old path before rescanning, or the next save
+        // would write the note straight back to the old filename.
         _currentRelativePath = null;
         AppSession.CurrentNoteRelativePath = null;
 
@@ -756,14 +1123,16 @@ public sealed partial class MainPage : Page
         StatusText.Text = $"Renamed {currentName} to {newName}.";
     }
 
+    // --- Opening and saving a note -----------------------------------------
+
     private void ShowAndEditNote(string? relativePath)
     {
         SaveCurrentNote();
         _currentRelativePath = relativePath;
 
-        // The file can vanish between being listed and being opened (external delete,
-        // rename by another tool) - a real possibility for a local-first app that
-        // doesn't own exclusive access to the vault.
+        // The file can vanish between being listed and being opened (external
+        // delete, rename by another tool) - a real possibility for a local-first app
+        // that doesn't own exclusive access to the vault.
         string content;
         try
         {
@@ -778,6 +1147,9 @@ public sealed partial class MainPage : Page
 
         AppSession.CurrentNoteRelativePath = relativePath;
         EditorStatusText.Text = relativePath is null ? "Select a note to edit." : $"Editing {relativePath}";
+        NoteTitleText.Text = relativePath is null
+            ? "No note selected"
+            : Path.GetFileNameWithoutExtension(relativePath);
 
         // Deferred to the next dispatcher cycle - setting Editor.Text synchronously
         // inline in the click/scan call stack was part of what reproduced the crash
@@ -786,6 +1158,19 @@ public sealed partial class MainPage : Page
 
         ShowNoteMetadata(relativePath, content);
         ShowBacklinks(relativePath);
+        ShowWordCount(content);
+
+        // The tree highlights the open note, so a full repaint here keeps the
+        // selection in step with the editor. Cheap at personal-vault scale, and
+        // RenderTree is a no-op when a search or tag view is showing.
+        if (_activeQuery is null && _activeTag is null) RenderTree();
+    }
+
+    private void ShowWordCount(string content)
+    {
+        var words = content.Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries).Length;
+        var characters = content.Length;
+        StatusDetailText.Text = $"{words} words · {characters} chars";
     }
 
     // Read-only view of what the note declares: its own indexed metadata, its tags
@@ -833,9 +1218,9 @@ public sealed partial class MainPage : Page
 
         BacklinksHeaderText.Text = backlinkNotes.Count switch
         {
-            0 => "No backlinks.",
-            1 => "1 backlink:",
-            _ => $"{backlinkNotes.Count} backlinks:",
+            0 => "Nothing links here yet.",
+            1 => "1 note links here:",
+            _ => $"{backlinkNotes.Count} notes link here:",
         };
 
         BacklinksList.Children.Clear();
@@ -843,12 +1228,18 @@ public sealed partial class MainPage : Page
         {
             var button = new Button
             {
-                Content = backlinkNote.RelativePath,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Style = (Style)Application.Current.Resources["SidebarRowStyle"],
+                Content = new TextBlock
+                {
+                    Text = Path.GetFileNameWithoutExtension(backlinkNote.RelativePath),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                },
             };
-            button.Click += (_, _) => ShowAndEditNote(backlinkNote.RelativePath);
-            AddNoteContextMenu(button, backlinkNote.RelativePath);
+            ToolTipService.SetToolTip(button, backlinkNote.RelativePath);
+
+            var path = backlinkNote.RelativePath;
+            button.Click += (_, _) => ShowAndEditNote(path);
+            AddNoteContextMenu(button, path);
             BacklinksList.Children.Add(button);
         }
     }
@@ -868,13 +1259,18 @@ public sealed partial class MainPage : Page
             new SearchScanner(AppSession.VaultPath, vaultIndex, AppSession.OpenSearchIndex()).Scan();
             new TagScanner(AppSession.VaultPath, vaultIndex, AppSession.OpenTagIndex()).Scan();
 
+            var notes = vaultIndex.GetAll().OrderBy(n => n.RelativePath).ToList();
+            _notesById = notes.ToDictionary(n => n.Id);
+
             // The edit can have added or removed tags, so the tag panel, the note's
-            // metadata line and the (possibly tag-filtered) list are all stale now.
+            // metadata and the sidebar are all stale now.
             PopulateTagsPanel();
             ShowNoteMetadata(_currentRelativePath, text);
-            RefreshNotesList();
+            RefreshView();
+            RenderTree();
 
             EditorStatusText.Text = $"Editing {_currentRelativePath} (saved {DateTime.Now:T})";
+            StatusText.Text = "Saved.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {

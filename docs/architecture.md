@@ -303,7 +303,64 @@ Concretely:
   re-reads everything: the recovery path for a cursor that has drifted.
 - The shell shows unresolved conflicts inline with the two buttons per note
   (again: no dialogs on this runtime).
+## The shell (Obsidian-shaped)
+
+The window is a deliberate imitation of Obsidian's: a narrow icon ribbon, the
+file tree on the left, the note in the middle, the note's context on the right, a
+status bar along the bottom, and `Ctrl+F` / `Ctrl+S` / `Ctrl+B` / `Ctrl+I` /
+`Ctrl+G` / `Ctrl+P`. None of that is original, and that is the point - a tool
+someone uses all day should be one they already know how to drive.
+
+- `VaultTree` (Core) turns the relative paths the vault index already holds into a
+  folder tree: folders exist only because a note lives under them, folders sort
+  before notes, everything case-insensitively, and `.md` is stripped from what is
+  shown. It is pure data so it can be tested without a UI; the shell decides how a
+  node looks. 14 tests.
+- The tree is rendered **flat**, one row per node with an indent per level, rather
+  than as nested `TreeView`s. Two reasons, both practical: a row has to be
+  swappable in and out for the inline rename, which means it has to be a direct
+  child of the panel holding it; and a collapsed folder's rows are never built at
+  all, which is what keeps a large vault from creating a control per hidden row.
+- The sidebar has **one** content area and swaps between four views - the tree, a
+  search or tag result, the sync settings, the conflicts - rather than stacking
+  panels. Nothing has to agree about space, and there is no fifth thing to
+  remember to hide.
+- Colours come from theme resources, so the shell follows the system light/dark
+  setting. Two places needed care: a theme brush **cannot** be looked up from
+  `Application.Current.Resources` in code (only what the app declares itself is
+  reachable there), so the selected-row state is a *style* declared in App.xaml;
+  and `Path.Data` is a `Geometry`, not a string, so the folder chevron is built
+  with `PathFigure`/`LineSegment`.
+- Icons are hand-drawn geometry, not a symbol font. A missing or renumbered glyph
+  renders as a tofu box, and there is no way to see that from here. Nothing uses an
+  arc: a circle drawn as two identical arc commands is a trick that parses and then
+  takes the renderer down.
+
+## Seeing the UI from the shell
+
+Screenshotting this app used to be impossible from here, which is why "it looks
+fine" went unverified for nine phases. It is possible, and worth doing:
+
+- `PrintWindow` with `PW_RENDERFULLCONTENT` (flag 2) captures the window without
+  touching it. `CopyFromScreen` works too but only shows whatever is on top.
+- **Do not** call `SetForegroundWindow` or `ShowWindow` on this app's window. Doing
+  so reliably kills the process with the same stowed native exception
+  (0xc000027b, `Microsoft.UI.Xaml.dll`) - the app is fine, the act of raising it
+  is not. Capture first, ask questions later.
+- A crash that appears right after a screenshot is usually this, not the change
+  under test. Check the Application event log for the timestamp and compare it
+  against when the app was launched before blaming the code.
 ## Known Issues
+
+- **A hand-written `ControlTemplate` whose `ContentPresenter` carries the button's
+  content crashes the process** (0xc000027b, `Microsoft.UI.Xaml.dll`) as soon as
+  that content is a shape rather than text. Found by launching, twice: the first
+  build rendered nothing at all, which looked like a styling bug, and "fixing" it
+  by adding the presenter is what started killing the app. The icon buttons
+  therefore keep the framework's own template and only override the setters.
+  `SidebarRowStyle` has the same shape of template and works, because its content
+  is text - which is exactly why this was worth chasing down rather than working
+  around.
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
   this machine's WindowsAppSDK 2.4.0 (preview) build, when reading back
@@ -465,4 +522,7 @@ Concretely:
   pushes the local copy over the server's and clears the conflict; "take theirs"
   overwrites the local file and records the server's hash so the next sync
   doesn't re-conflict. A path collision is a 409, not a 500.
-- 196 tests pass (126 Core, 34 Data, 36 Server).
+- The shell redesign verified live: launched, the vault reopened by itself, the
+  tree, ribbon, status bar and both sidebars render, and the icons were checked
+  by capturing the window (see "Seeing the UI from the shell").
+- 210 tests pass (140 Core, 34 Data, 36 Server).

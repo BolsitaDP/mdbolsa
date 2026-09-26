@@ -8,139 +8,301 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
+    <!--
+        An Obsidian-shaped shell: a narrow icon ribbon, a file tree on the left, the
+        note in the middle, the note's context on the right, and a status bar along
+        the bottom. The mental model is the one people already have from Obsidian,
+        so nothing here needs explaining.
+
+        Three constraints shaped this, all learned the hard way (see
+        docs/architecture.md's Known Issues):
+
+        * No XAML popups of any kind - MenuFlyout, ContextFlyout, ContentDialog.
+          They crash this build of the Windows App Runtime. Everything that would
+          normally be a menu is an inline panel or a plain button, and the sidebar
+          swaps between its views instead of opening anything.
+        * Colours come from theme resources, never literals, so the whole shell
+          follows the system light/dark setting instead of being a white app on a
+          dark desktop.
+        * Icons are hand-drawn geometry rather than a symbol font, because a missing
+          or renumbered glyph renders as a tofu box and there is no way to see that
+          from here. A hand-drawn chevron is duller and always right.
+        * No icon uses an arc. A circle drawn as two identical arc commands parses
+          and then takes the XAML renderer down with a stowed native exception
+          (0xc000027b) - found by launching, not by reading - so round shapes are
+          Ellipses and everything else is straight lines.
+    -->
     <Grid>
-        <!--
-            The graph view (Phase 7) lives in its own Frame *inside* this page
-            rather than being navigated to from the root Frame. Navigating the
-            root Frame unloads MainPage, and unloading a page holding the Editor
-            TextBox reliably crashed the process natively (STATUS_STOWED_EXCEPTION
-            0xc000027b) - the same class of failure documented in
-            docs/architecture.md's Known Issues. Hosting it here means the editor
-            is never torn down; MainContent is just hidden while the graph is up.
-        -->
-        <Grid x:Name="MainContent" Padding="24">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Orientation="Horizontal" Spacing="12">
-            <TextBox x:Name="VaultPathBox" Width="400" PlaceholderText="Vault folder path" />
-            <Button x:Name="BrowseVaultButton" Content="Browse..." Click="OnBrowseVaultClicked" />
-            <Button x:Name="OpenVaultButton" Content="Open vault" Click="OnOpenVaultClicked" />
-            <Button x:Name="GraphButton" Content="Graph" Click="OnGraphClicked" />
-            <Button x:Name="SyncButton" Content="Sync" Click="OnSyncClicked" />
-            <Button x:Name="ConflictsButton" Content="Conflicts" Click="OnConflictsClicked" />
-            <Button x:Name="SyncSettingsButton" Content="Sync settings..." Click="OnSyncSettingsClicked" />
-        </StackPanel>
-
-        <!--
-            Sync settings live inline in the page rather than in a dialog: opening
-            any XAML popup crashes this build of the Windows App Runtime (see
-            docs/architecture.md's Known Issues).
-        -->
-        <Grid Grid.Row="1" x:Name="SyncSettingsPanel" Visibility="Collapsed" ColumnSpacing="12" Margin="0,0,0,8">
+        <Grid x:Name="RootLayout">
+            <Grid.KeyboardAccelerators>
+                <KeyboardAccelerator Key="S" Modifiers="Control" Invoked="OnSaveAccelerator" />
+                <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnFindAccelerator" />
+                <KeyboardAccelerator Key="P" Modifiers="Control" Invoked="OnQuickSwitcherAccelerator" />
+                <KeyboardAccelerator Key="B" Modifiers="Control" Invoked="OnToggleLeftAccelerator" />
+                <KeyboardAccelerator Key="I" Modifiers="Control" Invoked="OnToggleRightAccelerator" />
+                <KeyboardAccelerator Key="G" Modifiers="Control" Invoked="OnGraphAccelerator" />
+            </Grid.KeyboardAccelerators>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="320" />
-                <ColumnDefinition Width="200" />
                 <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="Server URL" VerticalAlignment="Center" Margin="0,0,8,0" />
-            <TextBox x:Name="SyncServerBox" Grid.Column="1" PlaceholderText="http://localhost:5080" />
-            <PasswordBox x:Name="SyncTokenBox" Grid.Column="2" PlaceholderText="Sync token" />
-            <Button Grid.Column="3" Content="Save" Click="OnSaveSyncSettingsClicked" />
-        </Grid>
-        <!--
-            Conflicts are resolved inline, for the same reason sync settings are:
-            no dialogs on this runtime. Each row offers the only two honest
-            choices - keep this device's copy, or take the server's - and neither
-            merges. See docs/decisions/0012-conflict-resolution.md.
-        -->
-        <StackPanel Grid.Row="2" x:Name="ConflictsPanel" Visibility="Collapsed" Margin="0,0,0,8">
-            <TextBlock Text="Conflicts" FontWeight="SemiBold" />
-            <TextBlock x:Name="ConflictsSummaryText" Opacity="0.7" Margin="0,4,0,4" TextWrapping="Wrap" />
-            <StackPanel x:Name="ConflictsList" Spacing="4" />
-        </StackPanel>
-        <TextBlock x:Name="StatusText" Grid.Row="3" Margin="0,8,0,8" Opacity="0.7"
-                   Text="Enter a vault folder path above, then click Open vault." />
-
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
-            <TextBox x:Name="SearchBox" Width="300" PlaceholderText="Search notes" />
-            <Button x:Name="SearchButton" Content="Search" Click="OnSearchClicked" />
-            <Button x:Name="ClearSearchButton" Content="Show all notes" Click="OnClearSearchClicked" />
-        </StackPanel>
-
-        <Grid Grid.Row="5" ColumnSpacing="16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="260" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <Grid Grid.Column="0">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+            <!-- ============================= RIBBON ============================ -->
+            <Border Grid.Column="0" Width="46"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,1,0">
+                <StackPanel Spacing="2" Margin="0,8,0,0">
+                    <Button Width="38" Height="38" Click="OnNotesRibbonClicked"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTipService.ToolTip="Notes" AutomationProperties.Name="Notes">
+                        <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 6,3 L 14,3 L 18,7 L 18,21 L 6,21 Z M 14,3 L 14,7 L 18,7"
+                                  Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.3" />
+                    </Button>
 
-                <Button x:Name="NewNoteButton" Content="New note" Click="OnNewNoteClicked"
-                        HorizontalAlignment="Stretch" Margin="0,0,0,8" />
+                    <Button Width="38" Height="38" Click="OnGraphRibbonClicked"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTipService.ToolTip="Graph" AutomationProperties.Name="Graph">
+                        <Grid Width="22" Height="22">
+                            <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 7,7 L 16,9 M 6,9 L 6,17 M 15,10 L 7,18"
+                                  Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.1" />
+                            <Ellipse Width="4.5" Height="4.5" Margin="4,4,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.2" />
+                            <Ellipse Width="4.5" Height="4.5" Margin="15,7,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.2" />
+                            <Ellipse Width="4.5" Height="4.5" Margin="4,16,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.2" />
+                        </Grid>
+                    </Button>
 
-                <Grid Grid.Row="1" Margin="0,0,0,8">
+                    <Rectangle Height="1" Margin="10,7" Opacity="0.28" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                    <Button x:Name="SyncRibbonButton" Width="38" Height="38" Click="OnSyncRibbonClicked"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTipService.ToolTip="Sync now" AutomationProperties.Name="Sync now">
+                        <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 4,9 L 18,9 M 14,5 L 18,9 L 14,13 M 20,15 L 6,15 M 10,11 L 6,15 L 10,19"
+                                  Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.3" />
+                    </Button>
+
+                    <Button Width="38" Height="38" Click="OnSyncSettingsRibbonClicked"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTipService.ToolTip="Sync settings" AutomationProperties.Name="Sync settings">
+                        <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 4,7 L 20,7 M 4,12 L 20,12 M 4,17 L 20,17 M 9,7 L 9,5 M 15,12 L 15,10 M 11,17 L 11,15"
+                                  Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.3" />
+                    </Button>
+
+                    <Button x:Name="ConflictsRibbonButton" Width="38" Height="38" Click="OnConflictsRibbonClicked"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTipService.ToolTip="Conflicts" AutomationProperties.Name="Conflicts">
+                        <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 12,3.5 L 21,19.5 L 3,19.5 Z M 12,9.5 L 12,14 M 12,16.6 L 12,16.7"
+                                  Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1.3" />
+                    </Button>
+
+                    <Rectangle Height="1" Margin="10,7" Opacity="0.28" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                    <Button x:Name="ToggleLeftSidebarButton" Width="38" Height="38" Click="OnToggleLeftSidebarClicked"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTipService.ToolTip="Hide the file list (Ctrl+B)"
+                            AutomationProperties.Name="Toggle file list">
+                        <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 3,5 L 21,5 L 21,19 L 3,19 Z M 9.5,5 L 9.5,19"
+                                  Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.3" />
+                    </Button>
+
+                    <Button x:Name="ToggleRightSidebarButton" Width="38" Height="38" Click="OnToggleRightSidebarClicked"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTipService.ToolTip="Hide note details (Ctrl+I)"
+                            AutomationProperties.Name="Toggle note details">
+                        <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 3,5 L 21,5 L 21,19 L 3,19 Z M 14.5,5 L 14.5,19"
+                                  Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.3" />
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <!-- =========================== LEFT SIDEBAR ======================== -->
+            <Border x:Name="LeftSidebar" Grid.Column="1" Width="270"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,1,0">
+                <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock x:Name="TagsHeaderText" Opacity="0.7" Text="No tags yet." />
-                    <ScrollViewer Grid.Row="1" MaxHeight="140" Margin="0,4,0,0">
-                        <StackPanel x:Name="TagsList" Spacing="2" />
-                    </ScrollViewer>
+
+                    <!-- vault header: which vault, and the three things you do to it -->
+                    <Grid Margin="10,10,6,6" ColumnSpacing="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock x:Name="VaultNameText" Grid.Column="0" VerticalAlignment="Center"
+                                   FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"
+                                   Text="No vault" ToolTipService.ToolTip="The open vault" />
+
+                        <Button Grid.Column="1" Click="OnRescanClicked" Padding="6"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTipService.ToolTip="Rescan the vault (files changed outside the app)"
+                                AutomationProperties.Name="Rescan">
+                            <Grid Width="20" Height="20">
+                                <Ellipse Width="15" Height="15" Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.2" Margin="0,0,4,0" />
+                                <Path StrokeStartLineCap="Round" Data="M 15,3 L 19,4 L 17,8"
+                                      Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.3" />
+                            </Grid>
+                        </Button>
+
+                        <Button Grid.Column="2" Click="OnNewNoteClicked" Padding="6"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTipService.ToolTip="New note" AutomationProperties.Name="New note">
+                            <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 12,6 L 12,18 M 6,12 L 18,12"
+                                      Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.3" />
+                        </Button>
+
+                        <Button Grid.Column="3" Click="OnBrowseVaultClicked" Padding="6"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTipService.ToolTip="Open a different vault"
+                                AutomationProperties.Name="Open a different vault">
+                            <Path StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M 3,7 L 9,7 L 11,10 L 21,10 L 21,19 L 3,19 Z"
+                                      Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.2" />
+                        </Button>
+                    </Grid>
+
+                    <!-- search: applied on Enter, never on every keystroke -->
+                    <TextBox x:Name="SearchBox" Grid.Row="1" Margin="10,0,10,8"
+                             PlaceholderText="Search notes (Ctrl+F)" FontSize="13"
+                             Padding="8,5,8,5" CornerRadius="4"
+                             KeyDown="OnSearchBoxKeyDown" />
+
+                    <!--
+                        The sidebar's one content area, swapped between four views
+                        rather than stacked. Only one is ever visible, so there is
+                        no question of two panels fighting for the same space.
+                    -->
+                    <Grid Grid.Row="2">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel x:Name="TreeList" Margin="4,0,4,8" />
+                        </ScrollViewer>
+
+                        <StackPanel x:Name="FlatListPanel" Visibility="Collapsed" Margin="4,0,4,8">
+                            <TextBlock x:Name="FlatListHeader" FontSize="12" Opacity="0.7"
+                                       Margin="6,0,6,6" TextWrapping="Wrap" />
+                            <StackPanel x:Name="NotesList" Spacing="1" />
+                            <Button Content="Clear" Click="OnClearSearchClicked" HorizontalAlignment="Left"
+                                    Margin="6,6,0,0" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="SyncSettingsPanel" Visibility="Collapsed" Margin="14,0,10,0" Spacing="8">
+                            <TextBlock Text="Sync settings" FontWeight="SemiBold" />
+                            <TextBlock Text="The server URL and the shared token. Nothing is sent anywhere until you press Sync."
+                                       FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+                            <TextBox x:Name="SyncServerBox" PlaceholderText="http://localhost:5080" FontSize="12" />
+                            <PasswordBox x:Name="SyncTokenBox" PlaceholderText="Sync token" FontSize="12" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button Content="Save" Click="OnSaveSyncSettingsClicked" />
+                                <Button Content="Cancel" Click="OnSyncSettingsRibbonClicked" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel x:Name="ConflictsPanel" Visibility="Collapsed" Margin="10,0,10,0" Spacing="8">
+                            <TextBlock Text="Conflicts" FontWeight="SemiBold" />
+                            <TextBlock x:Name="ConflictsSummaryText" FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+                            <StackPanel x:Name="ConflictsList" Spacing="6" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- ============================== NOTE ============================= -->
+            <Grid Grid.Column="2">
+                <!--
+                    The graph lives in a Frame inside this column, never in the root
+                    Frame: navigating the root Frame unloads this page, and tearing
+                    down a page holding the Editor TextBox crashes the process
+                    natively (STATUS_STOWED_EXCEPTION, 0xc000027b) - verified by
+                    bisection. MainContent is only hidden, so the editor is never
+                    torn down. See docs/architecture.md's Known Issues.
+                -->
+                <Grid x:Name="MainContent">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="30,18,30,0" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="NoteTitleText" Grid.Column="0" FontSize="25" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" Text="No note selected" />
+                        <Button x:Name="SaveButton" Grid.Column="1" Content="Save" Click="OnSaveClicked"
+                                ToolTipService.ToolTip="Save (Ctrl+S)" VerticalAlignment="Center" />
+                    </Grid>
+
+                    <TextBlock x:Name="EditorStatusText" Grid.Row="1" Margin="30,2,30,10"
+                               FontSize="12" Opacity="0.65" TextTrimming="CharacterEllipsis"
+                               ToolTipService.ToolTip="Path and sync state of the open note" />
+
+                    <TextBox x:Name="Editor" Grid.Row="2" Margin="22,0,22,18" Padding="8"
+                             AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="14"
+                             IsSpellCheckEnabled="False" BorderThickness="0" Background="Transparent"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
                 </Grid>
 
-                <ScrollViewer Grid.Row="2">
-                    <StackPanel x:Name="NotesList" Spacing="2" />
-                </ScrollViewer>
+                <Frame x:Name="GraphHost" Visibility="Collapsed" />
             </Grid>
 
-            <Grid Grid.Column="1">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            <!-- =========================== RIGHT SIDEBAR ======================= -->
+            <Border x:Name="RightSidebar" Grid.Column="3" Width="290"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1,0,0,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,18,12,18">
+                    <StackPanel Spacing="20">
+                        <StackPanel Spacing="8">
+                            <TextBlock x:Name="TagsHeaderText" Text="TAGS" FontSize="11" FontWeight="SemiBold"
+                                       Opacity="0.6" TextWrapping="Wrap" />
+                            <StackPanel x:Name="TagsList" Spacing="4" />
+                        </StackPanel>
 
-                <Grid Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="EditorStatusText" VerticalAlignment="Center" Opacity="0.7"
-                               Text="Select a note to edit." />
-                    <Button x:Name="SaveButton" Grid.Column="1" Content="Save" Click="OnSaveClicked" />
-                </Grid>
-                <TextBox x:Name="Editor" Grid.Row="1"
-                         AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas"
-                         IsSpellCheckEnabled="False"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="BACKLINKS" FontSize="11" FontWeight="SemiBold" Opacity="0.6" />
+                            <TextBlock x:Name="BacklinksHeaderText" FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+                            <StackPanel x:Name="BacklinksList" Spacing="1" />
+                        </StackPanel>
 
-                <TextBlock x:Name="NoteMetadataText" Grid.Row="2" Margin="0,8,0,4" Opacity="0.7"
-                           TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
-
-                <TextBlock x:Name="BacklinksHeaderText" Grid.Row="3" Margin="0,8,0,4" Opacity="0.7" />
-                <ScrollViewer Grid.Row="4" MaxHeight="160">
-                    <StackPanel x:Name="BacklinksList" Spacing="2" />
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="NOTE" FontSize="11" FontWeight="SemiBold" Opacity="0.6" />
+                            <TextBlock x:Name="NoteMetadataText" FontSize="12" Opacity="0.85" TextWrapping="Wrap"
+                                       FontFamily="Consolas" LineHeight="19" />
+                        </StackPanel>
+                    </StackPanel>
                 </ScrollViewer>
-            </Grid>
-        </Grid>
+            </Border>
         </Grid>
 
-        <Frame x:Name="GraphHost" Visibility="Collapsed" />
+        <!-- ============================ STATUS BAR =========================== -->
+        <Border Grid.Row="1" Padding="12,5"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" Grid.Column="0" FontSize="12" Opacity="0.75"
+                           TextTrimming="CharacterEllipsis" Text="Open a vault to begin." />
+                <TextBlock x:Name="StatusDetailText" Grid.Column="1" FontSize="12" Opacity="0.55" />
+            </Grid>
+        </Border>
     </Grid>
 </Page>
