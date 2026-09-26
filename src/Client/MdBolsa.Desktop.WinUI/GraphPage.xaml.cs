@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
 
@@ -54,34 +55,68 @@ public sealed partial class GraphPage : Page
     {
         InitializeComponent();
         Loaded += OnLoaded;
+
+        // The graph is laid out in a fixed virtual space and fitted to the viewport,
+        // but on first display the Canvas hasn't been measured yet (ActualWidth is
+        // 0), so the first fit falls back to the virtual size and leaves the graph
+        // small in a corner. Re-fit once the real size is known - but never fight
+        // the user: if they've panned or zoomed, leave the view alone.
+        GraphCanvas.SizeChanged += (_, args) =>
+        {
+            if (args.NewSize.Width > 0 && !_viewTouchedByUser) FitViewToViewport();
+        };
     }
 
+    private void OnBackClicked(object sender, RoutedEventArgs e)
+    {
+        // Hand control back to the notes page, which owns showing/hiding this view.
+        if (AppSession.Host is MainPage host) host.HideGraph();
+    }
+
+    // Everything here mutates controls - a RenderTransform, three combo boxes, and
+    // a Canvas that ends up with a shape and a label per node - so all of it is
+    // deferred to the next dispatcher cycle. Doing it inline in Loaded crashes the
+    // process natively (STATUS_STOWED_EXCEPTION, 0xc000027b in Microsoft.UI.Xaml.dll):
+    // mutating the tree while XAML is still processing Loaded is re-entrant, and the
+    // resulting failure is stowed rather than thrown, so it can't be caught. Same
+    // reason MainPage defers its auto-open and its Editor.Text. See
+    // docs/architecture.md's Known Issues.
+    // Everything here mutates controls - a RenderTransform, three combo boxes, and
+    // a Canvas that ends up with a shape and a label per node - so it is deferred to
+    // the next dispatcher cycle. Mutating the XAML tree while it is still processing
+    // Loaded is re-entrant, and the failure is stowed rather than thrown, so it
+    // crashes the process natively instead of raising a catchable exception. Same
+    // reason MainPage defers its auto-open. See docs/architecture.md's Known Issues.
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Scale first, then translate: the group's transform is translate(scale(p)),
-        // so a pan moves the graph by exactly the pointer delta regardless of zoom.
-        GraphCanvas.RenderTransform = new TransformGroup
+        DispatcherQueue.TryEnqueue(() =>
         {
-            Children = { _scaleTransform, _translateTransform },
-        };
+            // Populating the combo boxes fires their SelectionChanged handlers; the
+            // flag keeps that from rebuilding the graph once per selection change
+            // before there's anything to draw.
+            _suppressSelectionEvents = true;
 
-        // Populating the combo boxes fires their SelectionChanged handlers; the
-        // flag keeps that from rebuilding the graph once per selection change
-        // before there's anything to draw.
-        _suppressSelectionEvents = true;
+            // Scale first, then translate: the group's transform is
+            // translate(scale(p)), so a pan moves the graph by exactly the pointer
+            // delta regardless of zoom level.
+            GraphCanvas.RenderTransform = new TransformGroup
+            {
+                Children = { _scaleTransform, _translateTransform },
+            };
 
-        DepthBox.Items.Clear();
-        for (var depth = 1; depth <= GraphBuilder.MaxDepth; depth++)
-        {
-            DepthBox.Items.Add(depth.ToString());
-        }
+            DepthBox.Items.Clear();
+            for (var depth = 1; depth <= GraphBuilder.MaxDepth; depth++)
+            {
+                DepthBox.Items.Add(depth.ToString());
+            }
 
-        PopulateCenterBox();
-        DepthBox.SelectedIndex = 1;
-        ScopeBox.SelectedIndex = 0;
+            PopulateCenterBox();
+            DepthBox.SelectedIndex = 1;
+            ScopeBox.SelectedIndex = 0;
 
-        _suppressSelectionEvents = false;
-        Rebuild();
+            _suppressSelectionEvents = false;
+            Rebuild();
+        });
     }
 
     private void PopulateCenterBox()
@@ -103,11 +138,6 @@ public sealed partial class GraphPage : Page
         var current = AppSession.CurrentNoteRelativePath;
         if (current is not null && _noteIdsByPath.ContainsKey(current)) CenterBox.SelectedItem = current;
         else if (CenterBox.Items.Count > 0) CenterBox.SelectedIndex = 0;
-    }
-
-    private void OnBackClicked(object sender, RoutedEventArgs e)
-    {
-        if (Window.Current.Content is Frame frame && frame.CanGoBack) frame.GoBack();
     }
 
     private void OnRefreshClicked(object sender, RoutedEventArgs e)

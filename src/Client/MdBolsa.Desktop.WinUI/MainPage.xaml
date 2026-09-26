@@ -8,7 +8,17 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24">
+    <Grid>
+        <!--
+            The graph view (Phase 7) lives in its own Frame *inside* this page
+            rather than being navigated to from the root Frame. Navigating the
+            root Frame unloads MainPage, and unloading a page holding the Editor
+            TextBox reliably crashed the process natively (STATUS_STOWED_EXCEPTION
+            0xc000027b) - the same class of failure documented in
+            docs/architecture.md's Known Issues. Hosting it here means the editor
+            is never torn down; MainContent is just hidden while the graph is up.
+        -->
+        <Grid x:Name="MainContent" Padding="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -17,7 +27,8 @@
         </Grid.RowDefinitions>
 
         <StackPanel Orientation="Horizontal" Spacing="12">
-            <TextBox x:Name="VaultPathBox" Width="500" PlaceholderText="Vault folder path" />
+            <TextBox x:Name="VaultPathBox" Width="400" PlaceholderText="Vault folder path" />
+            <Button x:Name="BrowseVaultButton" Content="Browse..." Click="OnBrowseVaultClicked" />
             <Button x:Name="OpenVaultButton" Content="Open vault" Click="OnOpenVaultClicked" />
             <Button x:Name="GraphButton" Content="Graph" Click="OnGraphClicked" />
         </StackPanel>
@@ -95,5 +106,8 @@
                 </ScrollViewer>
             </Grid>
         </Grid>
+        </Grid>
+
+        <Frame x:Name="GraphHost" Visibility="Collapsed" />
     </Grid>
 </Page>

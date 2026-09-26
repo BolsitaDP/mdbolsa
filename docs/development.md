@@ -22,36 +22,60 @@ dotnet test src/MdBolsa.sln
 
 ## Run the Desktop Shell
 
-Plain `dotnet run` does **not** correctly register the debug package
-identity with this (preview) tooling and will fail with
-`REGDB_E_CLASSNOTREG`. Use the `winapp` CLI directly instead — it ships
-inside the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, not
-as an installable `dotnet tool`:
+Double-click the **`mdbolsa.lnk`** shortcut on the desktop. It runs
+[`run.cmd`](../run.cmd), which locates the `winapp` CLI in the NuGet
+cache and runs:
 
 ```bash
 "$HOME/.nuget/packages/microsoft.windows.sdk.buildtools.winapp/<version>/tools/win-x64/winapp.exe" \
   run src/Client/MdBolsa.Desktop.WinUI/MdBolsa.Desktop.WinUI.csproj -c Debug --arch x64 --detach
 ```
 
-Substitute the installed `<version>` (check the folder, or the
-`Microsoft.Windows.SDK.BuildTools.WinApp` `PackageReference` version in
-`MdBolsa.Desktop.WinUI.csproj`). Requires Developer Mode (Settings →
-Privacy & security → For developers). First run also installs any
-missing Windows App Runtime MSIX packages and registers a loose-layout
-package — no manual MSIX install step needed.
+`<version>` is looked up automatically (highest installed) — check
+`Microsoft.Windows.SDK.BuildTools.WinApp`'s `PackageReference` version in
+`MdBolsa.Desktop.WinUI.csproj` if you need to know. Requires Developer
+Mode (Settings → Privacy & security → For developers). First run also
+installs any missing Windows App Runtime MSIX packages and registers a
+loose-layout package — no manual MSIX install step needed.
 
-Once the window is open, type a vault folder's **absolute** path (e.g.
-the full path to [`samples/dev-vault/`](../samples/dev-vault)) into the
-text box and click "Rescan vault". It indexes that vault into a local
-SQLite db and lists what it found. There's no default/remembered path
-yet (Phase 2 doesn't persist app settings) - re-typing it after every
-restart is expected for now.
+If the shortcut ever goes missing (new machine, moved repo), recreate it
+with:
+
+```powershell
+$repo = "C:\Users\sgira\OneDrive\Escritorio\mdbolsa"
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\mdbolsa.lnk")
+$s.TargetPath = "$env:SystemRoot\System32\cmd.exe"
+$s.Arguments = "/c `"`"$repo\run.cmd`"`""
+$s.WorkingDirectory = $repo
+$s.WindowStyle = 7   # minimised: no console window in the way
+$s.IconLocation = "$repo\src\Client\MdBolsa.Desktop.WinUI\Assets\AppIcon.ico,0"
+$s.Save()
+```
+
+**There is no portable .exe to launch directly.** The build does produce
+`MdBolsa.Desktop.WinUI.exe`, but it dies on startup with
+`REGDB_E_CLASSNOTREG`: WinUI 3 packaged apps need package identity for
+the Windows App Runtime to resolve. Two things that look like they
+should work and don't: `create-debug-identity` on the published exe
+(registers the package in an empty install location, exe still fails),
+and `winapp run <publish-folder>` (registers, but the published exe
+still can't resolve the runtime). Project mode is the one that works.
+A real standalone build means a signed `.msix` — Phase 14.
+
+Once the window is open, click **Browse...** to pick a vault folder with
+the Windows folder picker (the text box is still there if you'd rather
+paste a path). The chosen folder is remembered, so the next launch
+reopens it automatically. To try the sample vault, pick
+[`samples/dev-vault/`](../samples/dev-vault).
 
 Don't try to pre-seed configuration by writing files into
 `%LOCALAPPDATA%\MdBolsa.Dev\` from outside the app (a script, a manual
 test step) - packaged apps get that folder redirected to a per-package
 virtualized location invisible to external writers. See
-[architecture.md](architecture.md) for why.
+[architecture.md](architecture.md) for why. The remembered vault path
+is different: it lives in the app's own `ApplicationData.Current`
+settings store, which is the only place that *is* writable from
+outside.
 
 ## Environments
 

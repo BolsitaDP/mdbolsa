@@ -21,6 +21,12 @@ public sealed partial class MainWindow : Window
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
+        // Window.Current is null in this app (verified: the folder picker reported
+        // having no window to parent its dialog to), so the window's id is captured
+        // here - where the window definitively exists - for anything that needs to
+        // own a native dialog. See AppSession.WindowId.
+        AppSession.WindowId = AppWindow.Id;
+
         // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
     }

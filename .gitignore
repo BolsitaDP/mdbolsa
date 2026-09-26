@@ -36,6 +36,9 @@ appsettings.Local.json
 # Local per-device app data if ever created under the repo during dev testing
 .data-dev/
 
+# winapp CLI scratch (debug package identities/manifests)
+.winapp/
+
 # OS
 Thumbs.db
 .DS_Store

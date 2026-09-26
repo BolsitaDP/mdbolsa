@@ -209,7 +209,7 @@ Concretely:
   a small static `AppSession` shared by the two pages. Deliberately not a DI
   container - see the dependency table above.
 
-## Known Issues (Resolved)
+## Known Issues
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
   this machine's WindowsAppSDK 2.4.0 (preview) build, when reading back
@@ -239,6 +239,23 @@ Concretely:
   above are the starting point, and reverting to a read-only viewer
   (`TextBlock.Text` set-only, never read back - proven completely
   stable throughout this investigation) is the known-safe fallback.
+
+- **The same `STATUS_STOWED_EXCEPTION` came back in Phase 7, from
+  mutating a control inside `Loaded`.** Auto-reopening the last vault
+  (setting `VaultPathBox.Text` and rescanning) crashed the process
+  natively on the first launch, again `0xc000027b` in
+  `Microsoft.UI.Xaml.dll`. Deferring the whole thing to the next
+  dispatcher cycle with `DispatcherQueue.TryEnqueue` - the same
+  treatment `Editor.Text` already gets in `ShowAndEditNote` - fixes it,
+  verified across repeated launches.
+  **What this adds to the picture:** it isn't (only) about *reading*
+  `TextBox.Text` back. Writing to a control's `Text` while the XAML
+  tree is still processing `Loaded` is re-entrant, and the resulting
+  XAML failure is stowed rather than thrown, which is why it can't be
+  caught. The rule for this shell is therefore: **mutate controls from a
+  deferred dispatcher callback, never inline in `Loaded`** - and treat
+  any "fixed" native crash here as fixed only after several cold
+  launches, not one.
 
 ## WinUI Project Notes (Phase 1)
 

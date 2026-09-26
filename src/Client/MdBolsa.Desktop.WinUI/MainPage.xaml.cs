@@ -6,6 +6,10 @@ using Microsoft.Data.Sqlite;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using System.Runtime.InteropServices;
+using Windows.System;
 
 namespace MdBolsa_Desktop_WinUI;
 
@@ -45,22 +49,95 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
+        AppSession.Host = this; // so GraphPage's "Back to notes" can hand control back
+        Loaded += OnLoaded;
     }
 
-    private void OnOpenVaultClicked(object sender, RoutedEventArgs e)
+    // Reopens the last vault on startup, so the common case is zero clicks. Guarded
+    // on VaultPath being null, because Loaded also fires when navigating back from
+    // the graph page - the vault is still open then, and rescanning it again would
+    // throw away the tag filter for no reason.
+    //
+    // The whole thing is deferred to the next dispatcher cycle, and that is not
+    // cosmetic: doing it inline (setting VaultPathBox.Text and rescanning) reliably
+    // reproduced the native STATUS_STOWED_EXCEPTION crash documented in
+    // docs/architecture.md's Known Issues - 0xc000027b in Microsoft.UI.Xaml.dll -
+    // because mutating a control while the tree is still handling Loaded is
+    // re-entrant. Same reason ShowAndEditNote defers Editor.Text.
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (AppSession.VaultPath is not null) return;
+
+        var remembered = AppSession.RecallVaultPath();
+        if (string.IsNullOrWhiteSpace(remembered)) return;
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            VaultPathBox.Text = remembered;
+
+            if (Directory.Exists(remembered))
+            {
+                OpenVault(remembered);
+            }
+            else
+            {
+                StatusText.Text = $"Last vault is not there anymore: {remembered}. Pick another one with Browse.";
+            }
+        });
+    }
+
+    private void OnOpenVaultClicked(object sender, RoutedEventArgs e) => OpenVault(VaultPathBox.Text.Trim());
+
+    // Windows' own folder picker, rather than making the user find and paste a path.
+    //
+    // This is Microsoft.Windows.Storage.Pickers.FolderPicker, not the UWP
+    // Windows.Storage.Pickers one: the desktop picker takes the window id in its
+    // constructor, while the UWP picker has no way to be told which window owns
+    // the dialog and simply never shows one (verified: it hangs on
+    // PickSingleFolderAsync with no dialog and no exception, which is why the
+    // earlier status-bar error was all we ever saw).
+    //
+    // The chosen path is passed straight to OpenVault instead of being read back
+    // out of the text box - no reason to round-trip a value we just set ourselves.
+    private async void OnBrowseVaultClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var windowId = AppSession.WindowId
+                ?? throw new InvalidOperationException("The app window isn't ready yet.");
+
+            var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(windowId)
+            {
+                CommitButtonText = "Open vault",
+                SuggestedStartLocation = Microsoft.Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+            };
+
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is null) return; // cancelled
+
+            VaultPathBox.Text = folder.Path;
+            OpenVault(folder.Path);
+        }
+        catch (Exception ex) when (ex is COMException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            StatusText.Text = $"Could not open the folder picker: {ex.Message}";
+        }
+    }
+
+    private void OpenVault(string path)
     {
         SaveCurrentNote();
         _currentRelativePath = null;
         _activeTag = null;
 
-        var path = VaultPathBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
         {
-            StatusText.Text = "Enter a valid vault folder path above, then click Open vault.";
+            StatusText.Text = "Pick a vault folder with Browse..., or type a path, then click Open vault.";
             return;
         }
 
         AppSession.VaultPath = path;
+        AppSession.RememberVaultPath(path);
         RescanAndRefreshList();
     }
 
@@ -87,9 +164,13 @@ public sealed partial class MainPage : Page
 
     private void OnSaveClicked(object sender, RoutedEventArgs e) => SaveCurrentNote();
 
-    // Phase 7's graph view is a second page rather than another panel here: it's
-    // a different view of the same indexes, and MainPage is already dense. The
-    // save happens first so the graph reads fresh indexes, not pre-edit ones.
+    // Phase 7's graph view. It is hosted in a Frame inside this page, *not* reached
+    // by navigating the root Frame: that unloads MainPage, and unloading a page
+    // holding the Editor TextBox crashes the process natively
+    // (STATUS_STOWED_EXCEPTION, 0xc000027b) - verified by bisection, with an empty
+    // GraphPage and an empty OnLoaded, so it is the teardown and not the graph.
+    // MainContent is only hidden, so the editor is never torn down. See
+    // docs/architecture.md's Known Issues.
     private void OnGraphClicked(object sender, RoutedEventArgs e)
     {
         if (AppSession.VaultPath is null)
@@ -101,7 +182,17 @@ public sealed partial class MainPage : Page
         SaveCurrentNote();
         AppSession.CurrentNoteRelativePath = _currentRelativePath;
 
-        if (Window.Current.Content is Frame frame) frame.Navigate(typeof(GraphPage));
+        MainContent.Visibility = Visibility.Collapsed;
+        GraphHost.Visibility = Visibility.Visible;
+        GraphHost.Navigate(typeof(GraphPage));
+    }
+
+    // Called by GraphPage's "Back to notes" button.
+    public void HideGraph()
+    {
+        GraphHost.Visibility = Visibility.Collapsed;
+        MainContent.Visibility = Visibility.Visible;
+        GraphHost.BackStack.Clear();
     }
 
     private void OnSearchClicked(object sender, RoutedEventArgs e)
@@ -145,6 +236,7 @@ public sealed partial class MainPage : Page
                 HorizontalContentAlignment = HorizontalAlignment.Left,
             };
             button.Click += (_, _) => ShowAndEditNote(note.RelativePath);
+            AddNoteContextMenu(button, note.RelativePath);
             NotesList.Children.Add(button);
         }
     }
@@ -261,8 +353,150 @@ public sealed partial class MainPage : Page
                 HorizontalContentAlignment = HorizontalAlignment.Left,
             };
             button.Click += (_, _) => ShowAndEditNote(note.RelativePath);
+            AddNoteContextMenu(button, note.RelativePath);
             NotesList.Children.Add(button);
         }
+    }
+
+    // Right-click starts a rename on any note entry - the notes list, search results
+    // and the backlinks panel.
+    //
+    // The editing UI is an inline TextBox swapped into the row, deliberately *not* a
+    // MenuFlyout/ContextFlyout popup: opening a XAML popup crashes this build of the
+    // Windows App Runtime (2.4.0 preview) with the same stowed native exception as
+    // the rest of the Known Issues in docs/architecture.md - verified, it kills the
+    // process on right-click. No popup, no crash.
+    private static void AddNoteContextMenu(Button button, string relativePath)
+    {
+        button.RightTapped += (_, args) =>
+        {
+            args.Handled = true;
+            AppSession.Host?.BeginInlineRename(button, relativePath);
+        };
+    }
+
+    private TextBox? _renameBox;
+    private FrameworkElement? _renameRow;
+    private string? _renamePath;
+    private bool _renameSettled;
+
+    // Swaps the note's row for a text box: Enter commits, Escape cancels, and losing
+    // focus cancels too (with _renameSettled keeping the two from fighting).
+    private void BeginInlineRename(FrameworkElement row, string relativePath)
+    {
+        CancelInlineRename();
+
+        if (row.Parent is not Panel parent) return;
+        var index = parent.Children.IndexOf(row);
+        if (index < 0) return;
+
+        var input = new TextBox
+        {
+            Text = Path.GetFileName(relativePath),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            FontFamily = new FontFamily("Consolas"),
+        };
+        input.Select(0, input.Text.Length);
+        input.KeyDown += OnRenameKeyDown;
+        input.LostFocus += (_, _) => CancelInlineRename();
+
+        _renameBox = input;
+        _renameRow = row;
+        _renamePath = relativePath;
+        _renameSettled = false;
+
+        parent.Children.RemoveAt(index);
+        parent.Children.Insert(index, input);
+        input.Focus(FocusState.Programmatic);
+    }
+
+    private void OnRenameKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case VirtualKey.Enter:
+                CommitInlineRename();
+                e.Handled = true;
+                break;
+            case VirtualKey.Escape:
+                CancelInlineRename();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void CommitInlineRename()
+    {
+        if (_renameSettled || _renameBox is null || _renamePath is null) return;
+
+        RenameNote(_renamePath, _renameBox.Text);
+    }
+
+    private void CancelInlineRename()
+    {
+        if (_renameSettled) return;
+        _renameSettled = true;
+        RestoreRenameRow();
+    }
+
+    private void RestoreRenameRow()
+    {
+        if (_renameBox is not null && _renameRow?.Parent is Panel parent)
+        {
+            var index = parent.Children.IndexOf(_renameBox);
+            if (index >= 0)
+            {
+                parent.Children.RemoveAt(index);
+                parent.Children.Insert(index, _renameRow);
+            }
+        }
+
+        _renameBox = null;
+        _renameRow = null;
+        _renamePath = null;
+        _renameSettled = false;
+    }
+
+    // Renames the note's file. The note keeps its identity: `id` lives in the
+    // frontmatter, not in the filename, so the vault scanner reconciles this as a
+    // move rather than a delete + create, and links resolve against the new path on
+    // the next scan. Links that pointed at the *old* name stop resolving - the app
+    // deliberately doesn't rewrite note content (see docs/decisions/0008), so the
+    // rescan's unresolved-link count in the status line is how you find them.
+    private void RenameNote(string relativePath, string requestedName)
+    {
+        if (AppSession.VaultPath is null) return;
+
+        var currentName = Path.GetFileName(relativePath);
+        var destination = Path.Combine(AppSession.VaultPath, NoteRename.Normalize(requestedName));
+        if (!NoteRename.TryResolve(
+                currentName, requestedName, File.Exists(destination), out var newName, out var error))
+        {
+            RestoreRenameRow();
+            StatusText.Text = error;
+            return;
+        }
+
+        RestoreRenameRow();
+
+        try
+        {
+            File.Move(ResolvePath(relativePath), Path.Combine(AppSession.VaultPath, newName));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText.Text = $"Could not rename {currentName}: {ex.Message}";
+            return;
+        }
+
+        // Drop the editor's claim on the old path before rescanning, or the next
+        // save would write the note straight back to the old filename.
+        _currentRelativePath = null;
+        AppSession.CurrentNoteRelativePath = null;
+
+        RescanAndRefreshList();
+        ShowAndEditNote(newName);
+        StatusText.Text = $"Renamed {currentName} to {newName}.";
     }
 
     private void ShowAndEditNote(string? relativePath)
@@ -357,6 +591,7 @@ public sealed partial class MainPage : Page
                 HorizontalContentAlignment = HorizontalAlignment.Left,
             };
             button.Click += (_, _) => ShowAndEditNote(backlinkNote.RelativePath);
+            AddNoteContextMenu(button, backlinkNote.RelativePath);
             BacklinksList.Children.Add(button);
         }
     }
