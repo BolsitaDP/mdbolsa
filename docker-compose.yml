@@ -1,0 +1,51 @@
+# mdbolsa sync/storage server - development stack.
+#
+# Two things this file exists to enforce (vision.md §6 and §7):
+#
+#  1. All persistent state lives under a single configurable root, APP_DATA_PATH,
+#     so moving from the Pi's microSD to a SATA SSD is a data copy plus a changed
+#     environment variable - not a code change or a rebuild.
+#  2. Development is completely separate from production. This file is for the
+#     local stack only; the Pi has its own compose file and its own credentials,
+#     and nothing here is ever pointed at real data.
+#
+# Usage:
+#   docker compose up -d              # start Postgres
+#   dotnet run --project src/Server/MdBolsa.Server   # start the API
+#
+# There is deliberately no committed password that matters: `mdbolsa_dev` is a
+# throwaway credential for a database on your own machine.
+
+name: mdbolsa-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mdbolsa-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mdbolsa_dev
+      POSTGRES_USER: mdbolsa
+      POSTGRES_PASSWORD: mdbolsa_dev
+      # The database refuses to initialise into a non-empty directory unless this
+      # is set for a fresh volume - cheap insurance against pointing a new volume
+      # at an old data directory.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # Bound to localhost only: the server has no authentication (Phase 8), so it
+      # must not be reachable from the network, even in development.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # The microSD -> SSD migration point. Change APP_DATA_PATH, move the files,
+      # restart. Nothing in the application changes.
+      - ${APP_DATA_PATH:-./.data-dev}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mdbolsa -d mdbolsa_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The API itself runs from the .NET SDK during development (`dotnet run`), not
+  # from a container: rebuilding a container on every code change is slower than
+  # a local build, and the Pi deployment is a separate concern (see
+  # docs/deployment.md). The Dockerfile is here for the Pi, not for the loop.

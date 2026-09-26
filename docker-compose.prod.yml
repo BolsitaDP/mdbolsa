@@ -1,0 +1,64 @@
+# mdbolsa sync/storage server - Raspberry Pi (production).
+#
+# Separate from docker-compose.yml on purpose: development runs the API from
+# source against a local Postgres, production runs both as containers. Keeping
+# them apart means the production file can be strict (no default ports, no
+# published database, no dev credentials) without slowing the dev loop down.
+#
+# Usage, from a tagged commit on `main` (never automatically - vision.md §8):
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Every value below comes from the environment. Nothing real is committed.
+
+name: mdbolsa
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mdbolsa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      # The microSD -> SSD migration point: change APP_DATA_PATH, move the files,
+      # restart. No code change, no rebuild (vision.md §6).
+      - ${APP_DATA_PATH:?set APP_DATA_PATH in .env}/postgres:/var/lib/postgresql/data
+    # No ports: the database is reachable only from the api container on this
+    # network. Publishing it would be the easiest way to lose the vault.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [mdbolsa]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mdbolsa-server:latest
+    container_name: mdbolsa-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      # Required: the server refuses to start in Production without it. This is
+      # the dev/prod isolation from vision.md §7 - there is deliberately no
+      # fallback value.
+      ConnectionStrings__Postgres: ${ConnectionStrings__Postgres:?set the production connection string in .env}
+    # Bound to loopback: the API has NO AUTHENTICATION yet (Phase 8), so it must
+    # not be reachable from the network. Put a reverse proxy with TLS in front of
+    # it - and add authentication first - before exposing it. See
+    # docs/decisions/0010-server-foundation.md.
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [mdbolsa]
+
+networks:
+  mdbolsa:

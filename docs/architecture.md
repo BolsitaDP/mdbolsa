@@ -209,6 +209,42 @@ Concretely:
   a small static `AppSession` shared by the two pages. Deliberately not a DI
   container - see the dependency table above.
 
+## Server Foundation (Phase 8)
+
+- `src/Server/MdBolsa.Server`: ASP.NET Core minimal API over PostgreSQL via raw
+  `Npgsql` (no ORM, same call as the client SQLite indexes). One `notes` table
+  carrying the sync metadata vision.md asks for in section 10 - `id`,
+  `content_hash`, `revision`, `device_id`, `updated_at` - plus `deleted_at`
+  tombstones, because a hard-deleted row is indistinguishable from a note that
+  was never synced. Endpoints: `GET/PUT/DELETE /api/notes/{id}` and
+  `GET /api/notes/changes` ("everything since X", paged by an
+  `(updated_at, id)` watermark). Rules: see
+  [0010-server-foundation](decisions/0010-server-foundation.md).
+- The server stores notes byte-for-byte and never parses Markdown or computes
+  hashes: the `.md` file stays the source of truth and the client stays the only
+  thing that understands it.
+- **No authentication**, explicitly and temporarily. What makes that safe today
+  is that nothing exposes the API: it binds to `localhost:5080` in development,
+  and the compose files publish Postgres on `127.0.0.1` only. Adding auth is the
+  first thing before the Pi, and it is Phase 9 first job.
+- Dev/Prod isolation is enforced in code, not by discipline: **in Production the
+  server refuses to start** without an explicit `ConnectionStrings:Postgres`, so
+  a development build cannot reach production by accident. Environment and
+  database host (never the password) are logged at startup and on `/health`.
+- `docker-compose.yml` (dev: Postgres only - the API runs from source so a
+  rebuild is a normal build), `docker-compose.prod.yml` (Pi: Postgres + API,
+  database not published, API on loopback), `Dockerfile` (multi-stage,
+  non-root). All persistent state hangs off one configurable `APP_DATA_PATH`, so
+  the microSD to SSD move is a data copy plus an environment variable.
+- 14 tests cover `NoteValidation` (the rules with decisions in them).
+  `NoteStore` itself is not unit-tested - it needs a real PostgreSQL;
+  integration tests against the compose database are a Phase 9 item and should
+  replace the hand-run `curl` sequence that verified this phase.
+- Two Npgsql details that cost time here: named parameters are `@name`, **not**
+  `$name` (PostgreSQL own placeholder syntax reaches the server literally and
+  fails with "syntax error at or near $"), and a multi-statement command cannot
+  carry parameters at all.
+
 ## Known Issues
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
@@ -295,6 +331,16 @@ Concretely:
   Application event log for `0xc000027b` before believing the UI is
   at fault.
 
+- Phase 8 (server) verified live against a real PostgreSQL 16 in Docker:
+  `/health` reports the resolved environment and database; a note PUT/GET
+  round-trips; a write with an **older** `updated_at` is refused (the stored
+  revision/hash stay put) while a newer one is applied; a path escaping the
+  vault (`../escape.md`) is rejected with 400; DELETE returns 204 and leaves a
+  tombstone that `/changes` reports with `deleted: true` and null content;
+  DELETE without the device header is rejected with 400. The Production
+  fail-fast was verified by accident first - `dotnet run` with no
+  launchSettings defaults to Production, and the server refused to start,
+  which is why `launchSettings.json` now exists.
 ## WinUI Project Notes (Phase 1)
 
 - The template defaults to `<Platforms>x86;x64;ARM64</Platforms>`,
@@ -349,4 +395,4 @@ Concretely:
 - Phase 7 (graph) is covered by tests only so far: the builder and the layout
   algorithm are unit-tested, but nothing has rendered a graph in a live shell
   run yet.
-- 114 tests pass (89 Core, 25 Data).
+- 145 tests pass (106 Core, 25 Data, 14 Server).

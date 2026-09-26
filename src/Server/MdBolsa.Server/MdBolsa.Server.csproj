@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MdBolsa.Server</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Raw ADO.NET against Npgsql, no EF Core - the same call as the client's
+      SQLite indexes (docs/architecture.md's dependency table). The server is a
+      thin storage/sync API over one table; a mapping layer would be overhead
+      with nothing to map.
+
+      No reference to MdBolsa.Core on purpose. The server's DTOs are its own
+      wire contract, and the client doesn't speak to the server until Phase 9.
+      When it does, the contract needs a home both sides can reference (a
+      MdBolsa.Contracts project, or Core) - noted in
+      docs/decisions/0010-server-foundation.md rather than guessed at now.
+    -->
+    <PackageReference Include="Npgsql" Version="8.0.3" />
+  </ItemGroup>
+
+</Project>
