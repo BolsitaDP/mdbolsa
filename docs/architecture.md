@@ -301,6 +301,20 @@ Concretely:
   existed from Phase 9 and wasn't mapped until the end-to-end tests hit it.
 - `ISyncStateStore.ResetCursor()` forgets the sync watermark so the next sync
   re-reads everything: the recovery path for a cursor that has drifted.
+- **Restore is not undo.** `ConflictResolver.RestoreAsync` writes an earlier
+  revision back as the note's *current* content, so the next sync pushes it as a new
+  revision and the history grows rather than rewrites. Rewinding the server's
+  history would throw away every edit made since, which is the opposite of what
+  someone who clicked "restore revision 4" is asking for. The one exception is
+  restoring the revision the server currently holds: that genuinely puts the two
+  back in agreement, so it records the hash and clears the conflict. Any other
+  restore leaves the note "changed here", because it is.
+- The history is in the **right sidebar**, not the left one. It is context for the
+  open note, not a view of the vault, and the left sidebar's single content area
+  belongs to the file list. Loading it is a network read, so opening a note kicks
+  it off rather than waiting for it - which means two loads can be in flight, and
+  a generation counter drops the stale one. Without it, switching notes quickly
+  appends both responses and you get two of every revision.
 - The shell shows unresolved conflicts inline with the two buttons per note
   (again: no dialogs on this runtime).
 ## The shell (Obsidian-shaped)

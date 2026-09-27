@@ -116,6 +116,49 @@ public sealed class ConflictResolver(
         return new ConflictResolutionResult(true, ConflictResolution.TakeRemote);
     }
 
+    /// <summary>
+    /// Puts an earlier revision back into the local file.
+    ///
+    /// Restoring is not undoing: it writes old content as the note's *current*
+    /// content, so the next sync pushes it as a new revision and the history grows
+    /// rather than rewrites. That is the only honest version of "go back" in a tool
+    /// where more than one device may be writing - the alternative, rewinding the
+    /// server's history, throws away the edits made since.
+    ///
+    /// The one exception: restoring the revision the server currently holds puts
+    /// the two back in agreement, so that case records the hash and clears any
+    /// conflict. Otherwise the conflict stands, because the note still differs from
+    /// the server and pretending otherwise would just resurface as a conflict on the
+    /// next sync.
+    /// </summary>
+    public async Task<ConflictResolutionResult> RestoreAsync(
+        string vaultRoot, Guid noteId, int revision, CancellationToken cancellationToken = default)
+    {
+        var relativePath = RelativePathOf(noteId);
+        if (relativePath is null)
+            return ConflictResolutionResult.Failed("This note is not in the vault, so there is nothing to restore into.");
+
+        // The history endpoint already carries the content of every revision, so
+        // there is no second request to make and no second shape to keep in step.
+        var version = (await GetHistoryAsync(noteId, cancellationToken))
+            .FirstOrDefault(candidate => candidate.Revision == revision);
+
+        if (version is null)
+            return ConflictResolutionResult.Failed($"Revision {revision} is no longer on the server.");
+
+        var fullPath = Resolve(vaultRoot, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, version.Content);
+
+        if (version.IsCurrent)
+        {
+            state.SetPushedHash(noteId, version.ContentHash);
+            state.RemoveConflict(noteId);
+        }
+
+        return new ConflictResolutionResult(true, ConflictResolution.Restore);
+    }
+
     private string? RelativePathOf(Guid noteId) =>
         vaultIndex.GetAll().FirstOrDefault(n => n.Id == noteId)?.RelativePath;
 

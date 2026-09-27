@@ -270,6 +270,14 @@
                         </StackPanel>
 
                         <StackPanel Spacing="8">
+                            <TextBlock x:Name="HistoryHeaderText" Text="HISTORY" FontSize="11" FontWeight="SemiBold"
+                                       Opacity="0.6" TextWrapping="Wrap" />
+                            <TextBlock x:Name="HistoryHintText" FontSize="12" Opacity="0.7" TextWrapping="Wrap"
+                                       Text="Open a note to see its revisions." />
+                            <StackPanel x:Name="HistoryList" Spacing="6" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="8">
                             <TextBlock Text="NOTE" FontSize="11" FontWeight="SemiBold" Opacity="0.6" />
                             <TextBlock x:Name="NoteMetadataText" FontSize="12" Opacity="0.85" TextWrapping="Wrap"
                                        FontFamily="Consolas" LineHeight="19" />

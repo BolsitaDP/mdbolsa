@@ -112,7 +112,7 @@
                 <Setter Property="FontWeight" Value="SemiBold" />
             </Style>
 
-            <Style x:Key="ConflictCardStyle" TargetType="Border">
+            <Style x:Key="CardStyle" TargetType="Border">
                 <Setter Property="CornerRadius" Value="6" />
                 <Setter Property="Padding" Value="10,8,10,8" />
                 <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />

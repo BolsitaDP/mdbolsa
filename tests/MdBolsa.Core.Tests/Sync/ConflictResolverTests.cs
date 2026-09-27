@@ -149,6 +149,76 @@ public class ConflictResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task Restore_PutsAnEarlierRevisionBackIntoTheLocalFile()
+    {
+        var id = WriteNote("# Mine", out var fullPath, out _);
+        _http.OnGet(_ => Results.JsonBody(new List<NoteVersion>
+        {
+            new(id, 7, "Contested.md", "# Theirs", "h2", Guid.NewGuid(), DateTimeOffset.UtcNow, true),
+            new(id, 6, "Contested.md", "# Older", "h1", Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(-1), false),
+        }));
+
+        var result = await Resolver().RestoreAsync(_root, id, revision: 6);
+
+        Assert.True(result.Resolved);
+        Assert.Equal(ConflictResolution.Restore, result.Choice);
+        Assert.Equal("# Older", File.ReadAllText(fullPath));
+    }
+
+    [Fact]
+    public async Task Restore_OfAnOlderRevision_LeavesTheNoteStillChanged()
+    {
+        // Restoring writes old content as the note's *current* content, so the next
+        // sync has to push it. Recording the server's hash here would make the note
+        // look synced when it isn't, and the edit would be lost.
+        var id = WriteNote("# Mine", out _, out _);
+        _http.OnGet(_ => Results.JsonBody(new List<NoteVersion>
+        {
+            new(id, 7, "Contested.md", "# Theirs", "h2", Guid.NewGuid(), DateTimeOffset.UtcNow, true),
+            new(id, 6, "Contested.md", "# Older", "h1", Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(-1), false),
+        }));
+
+        await Resolver().RestoreAsync(_root, id, revision: 6);
+
+        Assert.Null(_state.GetPushedHash(id));
+    }
+
+    [Fact]
+    public async Task Restore_OfTheCurrentRevision_LeavesTheNoteInSync()
+    {
+        // Restoring what the server already holds genuinely puts the two back in
+        // agreement, so this is the one case that can honestly record the hash and
+        // clear the conflict.
+        var id = WriteNote("# Mine", out _, out _);
+        _http.OnGet(_ => Results.JsonBody(new List<NoteVersion>
+        {
+            new(id, 7, "Contested.md", "# Theirs", "hash-theirs", Guid.NewGuid(), DateTimeOffset.UtcNow, true),
+            new(id, 6, "Contested.md", "# Older", "h1", Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(-1), false),
+        }));
+
+        await Resolver().RestoreAsync(_root, id, revision: 7);
+
+        Assert.Equal("hash-theirs", _state.GetPushedHash(id));
+        Assert.Empty(_state.GetConflicts());
+    }
+
+    [Fact]
+    public async Task Restore_OfARevisionThatIsGone_Fails_AndLeavesTheFileAlone()
+    {
+        var id = WriteNote("# Mine", out var fullPath, out _);
+        _http.OnGet(_ => Results.JsonBody(new List<NoteVersion>
+        {
+            new(id, 7, "Contested.md", "# Theirs", "h2", Guid.NewGuid(), DateTimeOffset.UtcNow, true),
+        }));
+
+        var result = await Resolver().RestoreAsync(_root, id, revision: 3);
+
+        Assert.False(result.Resolved);
+        Assert.NotNull(result.Error);
+        Assert.Equal("# Mine", File.ReadAllText(fullPath));
+    }
+
+    [Fact]
     public async Task Resolution_Fails_ForANoteThatIsNoLongerInTheVault()
     {
         var result = await Resolver().KeepLocalAsync(_root, Guid.NewGuid());

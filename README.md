@@ -10,6 +10,14 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
+**Note history is finally visible.** The server has been keeping every revision
+since Phase 10 and the client could ask for them - but the UI never did, so you
+could resolve a conflict and never go back. The right sidebar now lists the open
+note's revisions, newest first, with each one's content a click away and a
+**Restore** button on the ones that aren't current. Restoring is not undo: it makes
+that revision the note's current content, and the next sync pushes it as a new
+revision, so nothing is ever removed from the history.
+
 **A new shell, shaped like Obsidian's.** The window is now a narrow icon ribbon,
 the vault as a folder tree on the left, the note in the middle, the note's tags,
 backlinks and metadata on the right, and a status bar along the bottom - with

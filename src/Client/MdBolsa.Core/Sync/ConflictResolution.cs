@@ -11,6 +11,9 @@ public enum ConflictResolution
 
     /// <summary>Take what the server has, overwriting this device's copy.</summary>
     TakeRemote,
+
+    /// <summary>Put an earlier revision back, as the note's current content.</summary>
+    Restore,
 }
 
 public sealed record ConflictResolutionResult(bool Resolved, ConflictResolution Choice, string? Error = null)
