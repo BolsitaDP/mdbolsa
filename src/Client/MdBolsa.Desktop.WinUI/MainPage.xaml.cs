@@ -2090,6 +2090,31 @@ public sealed partial class MainPage : Page
 
     // --- Opening and saving a note -----------------------------------------
 
+    /// <summary>
+    /// Turns the preview on for a note that has a diagram in it.
+    ///
+    /// This is the fix for "it still just shows the raw markdown". It did, and the
+    /// reason was not a bug: the middle of the window is the *source* and never
+    /// stops being the source (ADR 0013), and the preview is off by default and
+    /// lives behind Ctrl+I. A note whose whole point is a picture, opened with the
+    /// preview off, is a wall of fences - and there is nothing in the window that
+    /// says the picture is there.
+    ///
+    /// So the presence of a diagram is enough to turn it on. Not the other way
+    /// round: a note with no diagram never has the preview forced open, because that
+    /// would be rearranging the window behind the person's back every time they
+    /// opened anything. And Ctrl+I still turns it off, because a toggle that
+    /// cannot be turned off is not a toggle.
+    /// </summary>
+    private void ShowPreviewIfTheNoteHasDiagrams(string markdown)
+    {
+        if (PreviewHost.Visibility == Visibility.Visible) return;
+        if (!markdown.Contains("```mermaid", StringComparison.OrdinalIgnoreCase)) return;
+
+        TogglePreview();
+        StatusText.Text = "This note has a diagram, so the preview is on. Ctrl+I turns it off.";
+    }
+
     private void ShowAndEditNote(string? relativePath)
     {
         SaveCurrentNote();
@@ -2124,6 +2149,7 @@ public sealed partial class MainPage : Page
         DispatcherQueue.TryEnqueue(() => Editor.Text = content);
 
         ShowNoteMetadata(relativePath, content);
+        ShowPreviewIfTheNoteHasDiagrams(content);
         ShowBacklinks(relativePath);
         ShowWordCount(content);
 

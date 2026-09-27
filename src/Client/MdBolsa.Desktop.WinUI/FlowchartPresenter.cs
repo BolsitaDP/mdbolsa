@@ -39,7 +39,18 @@ internal sealed class FlowchartPresenter
 
     private sealed record EdgeVisual(Line Line, Path? Head, DiagramEdge Edge, string FromId, string ToId);
     private sealed record GroupVisual(Rectangle Border, string Group, IReadOnlyList<string> Members);
-    private sealed record NodeVisual(FrameworkElement Box, string NodeId, double Width, double Height);
+
+    // A caption is a label on a group boundary, not a group.
+    private sealed record GroupCaption(TextBlock Label, string Group);
+    private sealed record NodeVisual(FrameworkElement Box, TextBlock Label, string NodeId);
+
+    /// <summary>The font a node's label is drawn at before any scaling.</summary>
+    private const double BaseFontSize = 12;
+
+    /// <summary>How the parser marks a subgraph's title node. Mirrors Core.</summary>
+    private const string SubgraphCaptionPrefix = "sub:";
+
+    private readonly List<GroupCaption> _captions = [];
 
     private FlowchartPresenter(
         Flowchart chart, Border frame, Canvas canvas, ScrollViewer scroller)
@@ -132,7 +143,15 @@ internal sealed class FlowchartPresenter
 
     private void Build()
     {
-        // Subgroup boxes go in first so they sit behind the nodes they contain.
+        // A subgraph's title is stored as a node with a "sub:" id, which is what the
+        // parser produces and what its tests assert. Here it is *not* drawn as a
+        // box: a caption floating beside the group it labels reads as another node
+        // in the diagram, and the whole point of the dashed rectangle is that it
+        // is a boundary, not a step. So the title becomes a label on the boundary.
+        var captionFor = _chart.Nodes
+            .Where(node => node.Id.StartsWith(SubgraphCaptionPrefix, StringComparison.Ordinal))
+            .ToDictionary(node => node.Id[SubgraphCaptionPrefix.Length..], node => node.Label);
+
         foreach (var group in _chart.Nodes
                      .SelectMany(node => node.Groups.Select(g => (Group: g, Node: node.Id)))
                      .GroupBy(pair => pair.Group)
@@ -148,6 +167,22 @@ internal sealed class FlowchartPresenter
             };
 
             _canvas.Children.Add(rectangle);
+
+            if (captionFor.TryGetValue(group.Key, out var caption))
+            {
+                var label = new TextBlock
+                {
+                    Text = caption,
+                    FontSize = 10,
+                    Opacity = 0.75,
+                    IsTextSelectionEnabled = false,
+                    Margin = new Thickness(0, 2, 0, 0),
+                };
+
+                _canvas.Children.Add(label);
+                _captions.Add(new GroupCaption(label, group.Key));
+            }
+
             _groups.Add(new GroupVisual(
                 rectangle, group.Key, group.Select(pair => pair.Node).ToList()));
         }
@@ -185,9 +220,12 @@ internal sealed class FlowchartPresenter
 
         foreach (var node in _chart.Nodes)
         {
-            var box = BuildNode(node);
+            // Captions were handled above, on the group boundary.
+            if (node.Id.StartsWith(SubgraphCaptionPrefix, StringComparison.Ordinal)) continue;
+
+            var box = BuildNode(node, out var label);
             _canvas.Children.Add(box);
-            _nodes.Add(new NodeVisual(box, node.Id, 0, 0));
+            _nodes.Add(new NodeVisual(box, label, node.Id));
         }
 
         // A nominal width for the first pass. The SizeChanged above replaces it as
@@ -195,12 +233,12 @@ internal sealed class FlowchartPresenter
         Relayout(520, 300);
     }
 
-    private FrameworkElement BuildNode(DiagramNode node)
+    private FrameworkElement BuildNode(DiagramNode node, out TextBlock label)
     {
-        var label = new TextBlock
+        label = new TextBlock
         {
             Text = node.Label,
-            FontSize = 12,
+            FontSize = BaseFontSize,
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -364,8 +402,23 @@ internal sealed class FlowchartPresenter
 
     private void Relayout(double width, double height)
     {
-        var positions = FlowchartLayout.Compute(_chart, width, height).ToDictionary(p => p.NodeId);
+        var positions = FlowchartLayout.Compute(_chart, width, height, out var scale)
+            .ToDictionary(p => p.NodeId);
+
         if (positions.Count == 0) return;
+
+        // The font scales with the diagram. Without this the boxes shrink and the
+        // text does not, and a box that fits eight characters of a seventeen
+        // character label shows "Escribe..." - which is the diagram failing to say
+        // the thing it is there to say. Core has no font, so it reports the scale
+        // and the shell applies it.
+        var fontSize = Math.Max(BaseFontSize * scale, 9);
+
+        // The label's own padding scales too, for the same reason the font does. It
+        // is 8px a side unscaled, and 16px of a 46px box is a third of it - at
+        // small sizes that padding is the difference between the whole word and an
+        // ellipsis.
+        var labelMargin = new Thickness(8 * scale, 0, 8 * scale, 0);
 
         foreach (var node in _nodes)
         {
@@ -373,6 +426,8 @@ internal sealed class FlowchartPresenter
 
             node.Box.Width = position.Width;
             node.Box.Height = position.Height;
+            node.Label.FontSize = fontSize;
+            node.Label.Margin = labelMargin;
 
             Canvas.SetLeft(node.Box, position.X - position.Width / 2);
             Canvas.SetTop(node.Box, position.Y - position.Height / 2);
@@ -421,6 +476,18 @@ internal sealed class FlowchartPresenter
             Canvas.SetTop(group.Border, top - 14);
             group.Border.Width = right - left + 28;
             group.Border.Height = bottom - top + 28;
+        }
+
+        // The caption sits inside the top-left corner of its group, and scales with
+        // the diagram for the same reason the node labels do.
+        foreach (var caption in _captions)
+        {
+            var group = _groups.FirstOrDefault(candidate => candidate.Group == caption.Group);
+            if (group is null || group.Members.Count == 0) continue;
+
+            caption.Label.FontSize = Math.Max(10 * scale, 8);
+            Canvas.SetLeft(caption.Label, Canvas.GetLeft(group.Border) + 8);
+            Canvas.SetTop(caption.Label, Canvas.GetTop(group.Border) - 6);
         }
 
         // Give the canvas the size of what is on it, so the ScrollViewer knows

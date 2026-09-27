@@ -208,7 +208,7 @@ public class FlowchartParserTests
     }
 
     [Fact]
-    public void A_subgraph_title_is_kept_as_its_own_caption_node()
+    public void A_subgraph_becomes_a_caption_and_never_a_node()
     {
         Assert.True(Parse("""
             flowchart TD
@@ -217,9 +217,36 @@ public class FlowchartParserTests
               end
             """, out var chart, out var error), error?.ToString());
 
-        Assert.NotNull(chart.Find("one"));
-        Assert.NotNull(chart.Find("sub:one"));
-        Assert.Equal("First steps", chart.Find("sub:one")!.Label);
+        // The bracket title is the label, and it lives in a caption node so the
+        // shell has something to draw on the boundary.
+        var caption = chart.Find("sub:one");
+        Assert.NotNull(caption);
+        Assert.Equal("First steps", caption!.Label);
+
+        // The subgraph itself is a boundary, not a step. If `one` were a node, every
+        // `subgraph Servidor` in a note would draw a box reading "Servidor" next to
+        // the group it names - a thing the diagram does not contain.
+        Assert.Null(chart.Find("one"));
+
+        // Two nodes: the caption and the one real step. The caption is a node so it
+        // has somewhere to be carried; the shell recognises the prefix and draws it
+        // on the boundary instead of as a box.
+        Assert.Equal(2, chart.NodeCount);
+    }
+
+    [Fact]
+    public void A_subgraph_without_a_bracket_title_is_labelled_with_its_own_name()
+    {
+        Assert.True(Parse("""
+            flowchart TD
+              subgraph Servidor
+                A[x]
+              end
+            """, out var chart, out var error), error?.ToString());
+
+        Assert.Equal("Servidor", chart.Find("sub:Servidor")!.Label);
+        Assert.Null(chart.Find("Servidor"));
+        Assert.Equal(2, chart.NodeCount);
     }
 
     [Fact]

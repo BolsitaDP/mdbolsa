@@ -71,6 +71,13 @@ public static class FlowchartParser
     private static readonly string[] IgnoredStatements =
         ["click", "style", "classdef", "class", "linkstyle", "accTitle", "accDescr"];
 
+    /// <summary>
+    /// Node ids starting with this are a subgraph's label rather than a step in the
+    /// flow. Public because the shell has to recognise one to draw it on the
+    /// boundary instead of as a box.
+    /// </summary>
+    public const string SubgraphCaptionPrefix = "sub:";
+
     public static bool TryParse(string? source, out Flowchart flowchart, out FlowchartParseError? error)
     {
         flowchart = Flowchart.Empty;
@@ -146,14 +153,19 @@ public static class FlowchartParser
                     return false;
                 }
 
-                EnsureNode(nodes, order, groupsOf, groupId, groupId, DiagramShape.Rectangle);
-
-                if (groupTitle is not null && !groupTitle.Equals(groupId, StringComparison.Ordinal))
-                {
-                    // The title is a caption rather than the node's name, so it is
-                    // kept as its own node and the subgraph id refers to the box.
-                    EnsureNode(nodes, order, groupsOf, "sub:" + groupId, groupTitle, DiagramShape.Rectangle);
-                }
+                // A subgraph is a *boundary*, not a step in the flow, so it never
+                // becomes a node. The first version created one for the group id,
+                // which meant every `subgraph Servidor` in a note drew a box
+                // reading "Servidor" floating next to the group it named - a thing
+                // the diagram did not contain.
+                //
+                // The label lives in a caption node instead, so it has somewhere to
+                // be carried, and the shell draws it on the boundary.
+                EnsureNode(
+                    nodes, order, groupsOf,
+                    SubgraphCaptionPrefix + groupId,
+                    groupTitle ?? groupId,
+                    DiagramShape.Rectangle);
 
                 groups.Add(groupId);
                 continue;

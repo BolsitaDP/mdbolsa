@@ -219,6 +219,27 @@ public class FlowchartLayoutTests
     }
 
     [Fact]
+    public void The_layout_reports_the_scale_it_applied_so_the_font_can_follow_it()
+    {
+        // A box shrinks with the diagram, so its text has to shrink too, or
+        // "Escribes una nota" becomes "Escribe...". Core has no font and cannot
+        // apply this itself - it can only report the scale, and the shell needs it
+        // to be told. The first version did not report it, and every label in a
+        // shrunken diagram was truncated.
+        Assert.True(FlowchartParser.TryParse("flowchart TD\n  A[a] --> B[b]", out var chart, out _));
+
+        var atFullSize = FlowchartLayout.Compute(chart, 2000, 2000, out var big);
+        Assert.Equal(1.0, big);
+
+        var atMinimum = FlowchartLayout.Compute(chart, 40, 40, out var small);
+        Assert.Equal(FlowchartLayout.MinimumScale, small);
+
+        // And the boxes really are smaller at the small size - otherwise the scale
+        // is being reported but not applied, which is the other half of the bug.
+        Assert.True(atMinimum.Max(p => p.Width) < atFullSize.Max(p => p.Width));
+    }
+
+    [Fact]
     public void A_diagram_with_nodes_but_no_edges_still_lays_out()
     {
         var positions = Layout("flowchart TD\n  A[a]\n  B[b]\n  C[c]");

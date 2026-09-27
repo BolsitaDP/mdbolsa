@@ -51,18 +51,21 @@ public static class FlowchartLayout
     /// How far a diagram may be shrunk to fit its pane.
     ///
     /// This is the one number in the layout that is a judgement rather than a
-    /// derivation, so it is worth being explicit about it. Shrinking a diagram
-    /// scales its boxes, and a box holds fewer characters as it gets smaller - at
-    /// half size a node labelled "Escribes una nota" shows four letters and an
-    /// ellipsis. A diagram of unreadable stubs is worse than a diagram you have to
-    /// scroll, so past this point the layout stops shrinking and reports a content
-    /// extent larger than the space it was given. The shell turns that into a
-    /// scrollbar, and the reader can see the whole thing.
+    /// derivation, so it is worth being explicit about what it is protecting.
+    /// Shrinking a diagram scales its boxes, and a box holds fewer characters as it
+    /// gets smaller. Below about 0.8 the truncation eats words: at 0.6 a node
+    /// labelled "Cilindro" showed "Cílin...", which is a shape that does not exist.
     ///
-    /// The alternative - shrink until it fits, whatever that costs - was the first
-    /// version, and it made a ten-node diagram unreadable in a preview pane.
+    /// So past this point the layout stops shrinking and reports a content extent
+    /// larger than the space it was given, and the shell turns that into a
+    /// scrollbar. A diagram you have to scroll is a small price; a diagram full of
+    /// invented words is not a price at all.
+    ///
+    /// 0.8 rather than 1.0 because vertical shrinking is still worth having: a
+    /// tall diagram that fits without the scrollbar is calmer to read, and at 0.8
+    /// the words are still whole.
     /// </summary>
-    public const double MinimumScale = 0.6;
+    public const double MinimumScale = 0.8;
 
     /// <summary>
     /// The space the laid-out diagram actually occupies, which is at least the
@@ -78,9 +81,26 @@ public static class FlowchartLayout
             positions.Max(p => p.Y + p.Height / 2) - positions.Min(p => p.Y - p.Height / 2));
     }
 
-    public static IReadOnlyList<DiagramPosition> Compute(Flowchart flowchart, double width, double height)
+    public static IReadOnlyList<DiagramPosition> Compute(
+        Flowchart flowchart, double width, double height) =>
+        Compute(flowchart, width, height, out _);
+
+    /// <summary>
+    /// Lays the flowchart out and reports the scale that was applied.
+    ///
+    /// The caller needs it: a box that is 60% of its natural size has to hold 60%
+    /// of its text, or the labels get truncated to their first few letters and the
+    /// diagram says "Escribes una nota" as "Escribe...". Scaling the font is the
+    /// shell's job - Core has no font - but it can only do it if it is told.
+    /// </summary>
+    public static IReadOnlyList<DiagramPosition> Compute(
+        Flowchart flowchart, double width, double height, out double scale)
     {
-        if (flowchart.Nodes.Count == 0) return [];
+        if (flowchart.Nodes.Count == 0)
+        {
+            scale = 1;
+            return [];
+        }
 
         var horizontal = flowchart.Direction is DiagramDirection.LeftRight or DiagramDirection.RightLeft;
         var ranks = AssignRanks(flowchart);
@@ -208,7 +228,7 @@ public static class FlowchartLayout
             }
         }
 
-        return Fit(positions, width, height);
+        return Fit(positions, width, height, out scale);
     }
 
     private static double SizeAlong(DiagramNode node, bool horizontal) =>
@@ -378,8 +398,9 @@ public static class FlowchartLayout
     /// two always agree.
     /// </summary>
     private static IReadOnlyList<DiagramPosition> Fit(
-        IReadOnlyList<DiagramPosition> positions, double width, double height)
+        IReadOnlyList<DiagramPosition> positions, double width, double height, out double scale)
     {
+        scale = 1;
         if (positions.Count == 0 || width <= 0 || height <= 0) return positions;
 
         var minX = positions.Min(p => p.X - p.Width / 2);
@@ -391,7 +412,7 @@ public static class FlowchartLayout
         var contentHeight = Math.Max(maxY - minY, 1);
 
         const double Padding = 20;
-        var scale = Math.Max(
+        scale = Math.Max(
             MinimumScale,
             Math.Min(
                 1.0,
@@ -402,12 +423,16 @@ public static class FlowchartLayout
         var centreX = (minX + maxX) / 2;
         var centreY = (minY + maxY) / 2;
 
+        // Copied out because `scale` is an out parameter and cannot be captured by
+        // the projection below.
+        var factor = scale;
+
         return positions.Select(position => position with
         {
-            X = (position.X - centreX) * scale + width / 2,
-            Y = (position.Y - centreY) * scale + height / 2,
-            Width = position.Width * scale,
-            Height = position.Height * scale,
+            X = (position.X - centreX) * factor + width / 2,
+            Y = (position.Y - centreY) * factor + height / 2,
+            Width = position.Width * factor,
+            Height = position.Height * factor,
         }).ToList();
     }
 }
