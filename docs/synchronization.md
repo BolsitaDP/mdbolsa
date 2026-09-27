@@ -40,9 +40,38 @@ and `deleted_at` as a tombstone (see [0010](decisions/0010-server-foundation.md)
 | `GET /api/notes/{id}` | One note |
 | `PUT /api/notes/{id}` | Store a change; **409** if refused, with the stored state |
 | `DELETE /api/notes/{id}` | Tombstone; needs `X-MdBolsa-Device` |
+| `GET /api/attachments` | Known attachments, newest first |
+| `PUT /api/attachments/{hash}` | Store bytes, verified against the hash in the path |
+| `GET /api/attachments/{hash}` | The bytes |
+| `POST /api/devices` | Mint a device token. **Shared token only** |
+| `GET /api/devices` | Every device, revoked included. **Shared token only** |
+| `DELETE /api/devices/{id}` | Revoke a device. **Shared token only** |
 
-Two headers on everything under `/api/notes`: `X-MdBolsa-Token` and
-`X-MdBolsa-Device`.
+Two headers on everything under `/api/notes` and `/api/attachments`:
+`X-MdBolsa-Token` and `X-MdBolsa-Device`.
+
+## Two tokens, and which is which
+
+`X-MdBolsa-Token` carries either of two things, and the server tells them apart
+by shape, not by asking:
+
+- **The shared token** (`Sync:Token`). Vault-wide, never leaves the owner's
+  hands, and the *only* credential allowed to mint or revoke a device.
+- **A device token** (`mdb_` + 32 hex). Issued once per device, stored by the
+  server as a hash only, and revocable on its own.
+
+So a client configured with the shared token keeps working untouched, and a
+client that has exchanged it for a device token can be shut off without touching
+anything else. In the app, the exchange is one button in sync settings: paste the
+shared token, press **Create this device's token**, and the box is replaced with
+one only that machine can use. See
+[0014](decisions/0014-per-device-tokens.md) for what this deliberately leaves
+out (no expiry, no scopes, no accounts).
+
+A device token **cannot** mint or revoke devices. That is the property that makes
+the phase worth anything, and it is enforced on a separate code path from
+ordinary authentication on purpose.
+
 
 ## What the client does, in order
 

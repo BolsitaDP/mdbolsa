@@ -865,7 +865,93 @@ public sealed partial class MainPage : Page
 
         SyncServerBox.Text = AppSession.ServerUrl ?? string.Empty;
         SyncTokenBox.Password = AppSession.ServerToken ?? string.Empty;
+        DeviceNameBox.Text = DeviceName.ForThisMachine();
+        RefreshTokenHelpText();
         ShowSidebarView(SyncSettingsPanel);
+    }
+
+    // The box is a PasswordBox, so its contents cannot be inspected to decide what
+    // to say about them; the shape of the token is the honest proxy, and it is the
+    // same rule the server uses to tell the two apart.
+    private void RefreshTokenHelpText()
+    {
+        var token = SyncTokenBox.Password;
+        if (token.Length == 0)
+        {
+            SyncTokenHelpText.Text =
+                "No token yet. Paste the server's shared token, then press Create this device's token.";
+            return;
+        }
+
+        SyncTokenHelpText.Text = token.StartsWith("mdb_", StringComparison.Ordinal)
+            ? "This device has its own token. Revoke it from the server's device list if this machine is lost."
+            : "Using the shared token. Press Create this device's token once to get one that can be revoked on its own.";
+    }
+
+    /// <summary>
+    /// Trades the shared token in the box for one only this machine can use, and
+    /// stores that instead.
+    ///
+    /// The shared token is what the owner typed, and it is a vault-wide credential:
+    /// with it, anything can read and write every note and upload every attachment.
+    /// This button is the way out of that, and it is a one-way door on purpose -
+    /// the app does not keep a copy of the shared token, so after this the
+    /// bootstrap secret exists only wherever the owner keeps it.
+    /// </summary>
+    private async void OnCreateDeviceTokenClicked(object sender, RoutedEventArgs e)
+    {
+        var url = SyncServerBox.Text.Trim();
+        if (!Uri.TryCreate(url.Length == 0 ? AppSession.ServerUrl ?? "" : url, UriKind.Absolute, out var server))
+        {
+            StatusText.Text = "Set the server URL first.";
+            return;
+        }
+
+        var sharedToken = SyncTokenBox.Password;
+        if (sharedToken.Length == 0)
+        {
+            StatusText.Text = "Paste the server's shared token first - that is what gets exchanged.";
+            return;
+        }
+
+        if (sharedToken.StartsWith("mdb_", StringComparison.Ordinal))
+        {
+            StatusText.Text = "That is already a device token. Paste the shared token to create a new one.";
+            return;
+        }
+
+        var deviceName = DeviceNameBox.Text.Trim();
+        if (deviceName.Length == 0) deviceName = DeviceName.ForThisMachine();
+
+        CreateDeviceTokenButton.IsEnabled = false;
+        CreateDeviceTokenButton.Content = "Asking the server...";
+
+        try
+        {
+            using var http = new HttpClient { BaseAddress = server, Timeout = TimeSpan.FromSeconds(30) };
+            var client = new DeviceTokenClient(http, sharedToken);
+            var minted = await client.MintAsync(deviceName);
+
+            // This is the moment the shared token stops being on this machine.
+            AppSession.ServerUrl = server.ToString().TrimEnd('/');
+            AppSession.ServerToken = minted.Token;
+            SyncTokenBox.Password = minted.Token;
+            RefreshTokenHelpText();
+
+            StatusText.Text = $"This device is now \"{minted.Name}\". Save to keep it.";
+        }
+        catch (Exception ex)
+        {
+            // An unreachable server, a wrong token, a name the server refused: the
+            // message from the client already says which, and inventing a vaguer
+            // one here would throw that away.
+            StatusText.Text = ex is SyncException ? ex.Message : $"Could not reach the server. {ex.Message}";
+        }
+        finally
+        {
+            CreateDeviceTokenButton.IsEnabled = true;
+            CreateDeviceTokenButton.Content = "Create this device's token";
+        }
     }
 
     private void OnSaveSyncSettingsClicked(object sender, RoutedEventArgs e)

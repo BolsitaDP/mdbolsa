@@ -8,23 +8,14 @@ public static class NoteEndpoints
 {
     // Phase 9 shape: a storage/sync API with one shared token in front of it.
     // See docs/decisions/0011-client-sync.md.
-    public static IEndpointRouteBuilder MapNoteEndpoints(this IEndpointRouteBuilder app, string? token)
+    public static IEndpointRouteBuilder MapNoteEndpoints(this IEndpointRouteBuilder app, TokenAuthenticator auth)
     {
         var notes = app.MapGroup("/api/notes").WithTags("notes");
 
-        // Every /api/notes route needs the token. /health does not: it exposes
+        // Every /api/notes route needs a token. /health does not: it exposes
         // nothing but the environment name and database host, and a health probe
         // that 401s is worse than useless.
-        notes.AddEndpointFilter(async (context, next) =>
-        {
-            var presented = context.HttpContext.Request.Headers[SyncHeaders.Token].ToString();
-            if (!TokenValidator.IsValid(presented, token))
-            {
-                return Results.Unauthorized();
-            }
-
-            return await next(context);
-        });
+        notes.AddEndpointFilter(TokenAuthFilter.ForGroup(auth));
 
         notes.MapGet("/{id:guid}", async Task<IResult> (Guid id, NoteStore store, CancellationToken ct) =>
         {

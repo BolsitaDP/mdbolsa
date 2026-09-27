@@ -1,4 +1,5 @@
 using MdBolsa.Contracts;
+using MdBolsa.Server.Auth;
 using MdBolsa.Server.Endpoints;
 using MdBolsa.Server.Attachments;
 using MdBolsa.Server.Notes;
@@ -51,13 +52,18 @@ if (isProduction && string.IsNullOrWhiteSpace(token))
         "unauthenticated note store is not a production configuration.");
 }
 
+var deviceTokens = new DeviceTokenStore(connectionString);
+var authenticator = new TokenAuthenticator(token, deviceTokens);
+
 builder.Services.AddSingleton(new NoteStore(connectionString));
 builder.Services.AddSingleton(new AttachmentStore(connectionString));
+builder.Services.AddSingleton(deviceTokens);
+builder.Services.AddSingleton(authenticator);
 builder.Services.AddSingleton(new ServerInfo(
     environment,
     DescribeHost(connectionString),
     AttachmentSchema.Version,
-    isProduction ? "shared token" : string.IsNullOrWhiteSpace(token) ? "none" : "shared token (development default)"));
+    DescribeAuthentication(token, isProduction)));
 
 var app = builder.Build();
 
@@ -78,9 +84,10 @@ app.MapGet("/health", (ServerInfo info) => Results.Ok(new
     authentication = info.Authentication,
 }));
 
-app.MapNoteEndpoints(token);
-app.MapConflictEndpoints(token);
-app.MapAttachmentEndpoints(token);
+app.MapNoteEndpoints(authenticator);
+app.MapConflictEndpoints(authenticator);
+app.MapAttachmentEndpoints(authenticator);
+app.MapDeviceTokenEndpoints(authenticator);
 
 // The schema is created on boot, not by a migration step (see NoteSchema).
 // Failure here is fatal on purpose: a sync server that starts without its
@@ -88,6 +95,7 @@ app.MapAttachmentEndpoints(token);
 try
 {
     await AttachmentSchema.InitialiseAsync(connectionString);
+    await DeviceTokenStore.InitialiseAsync(connectionString);
 }
 catch (Exception ex)
 {
@@ -106,6 +114,20 @@ static string DescribeHost(string connectionString)
     var database = parts.FirstOrDefault(p => p.StartsWith("Database=", StringComparison.OrdinalIgnoreCase))?
         .Split('=', 2)[1] ?? "unknown";
     return $"{host}/{database}";
+}
+
+// What /health reports about auth, in words a person can act on. It deliberately
+// does not count the devices: /health needs no token, so a count would tell anyone
+// who can reach the port how many credentials exist for this vault.
+static string DescribeAuthentication(string? token, bool isProduction)
+{
+    if (string.IsNullOrWhiteSpace(token))
+    {
+        return "device tokens only (no shared token: nothing can mint or revoke)";
+    }
+
+    var shared = isProduction ? "shared token" : "shared token (development default)";
+    return $"{shared} + per-device tokens";
 }
 
 /// <summary>Startup facts worth logging, and worth exposing on /health.</summary>

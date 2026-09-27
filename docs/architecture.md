@@ -266,7 +266,11 @@ Concretely:
   per *machine*, so it lives in the app's settings store instead.
 - Authentication: one shared token in `X-MdBolsa-Token`, compared on hashes in
   constant time. `/health` stays open and says which auth is in force. In
-  Production the server refuses to start without a token.
+  Production the server refuses to start without a token. Since
+  [0014](decisions/0014-per-device-tokens.md) that token is also the bootstrap
+  credential: it can mint per-device tokens, which are revocable one at a time,
+  and which cannot mint anything themselves. Both are carried in the same
+  header and told apart by the `mdb_` prefix, so no existing client changed.
 - The shell adds a **Sync** button and an inline **Sync settings** panel (no
   dialog - popups crash this runtime). Saving a note does no network work at
   all: typing never waits on a round trip, per vision.md §10.
@@ -342,6 +346,53 @@ the clock.
 The re-entrancy rule from the Known Issues applies here too: `_syncRunning` stops a
 tick from starting a second sync on top of the first.- The shell shows unresolved conflicts inline with the two buttons per note
   (again: no dialogs on this runtime).
+## Per-device tokens
+
+Phase 9 put one shared token in front of everything, and said plainly what that
+did not buy. Attachments then made it worse than "read-only": a shared token
+could now **upload**, so anyone holding it could spend the owner's disk and put
+bytes where a client renders them. It also meant one lost laptop revoked the
+whole thing, and re-keying the house is a recovery nobody performs.
+
+So the shared token is now a *bootstrap* credential. It stays valid - no existing
+client changed, and "paste one string and it works" is untouched - and it can
+mint a token per device, revocable on its own:
+
+- `device_tokens` on the server: id, name, `sha256(token)`, created, last seen,
+  revoked. **The plaintext is never stored**, so a lost device's token cannot be
+  read off the server; it gets revoked and replaced. That trade is the point.
+- `TokenAuthenticator` decides, and the two credentials are told apart by the
+  `mdb_` prefix, so both travel in the same header and a client cannot tell the
+  difference. A non-`mdb_` token never reaches the database.
+- **A device token cannot mint or revoke devices.** Enforced by
+  `IsSharedToken` - a deliberately separate check from "is this a valid token" -
+  because reusing the general path is exactly how one stolen laptop would become
+  permanent access. Three copies of that check, one per endpoint group, is three
+  places to get it wrong, so there is now one: `TokenAuthFilter`.
+- Revoking sets `revoked_at` and keeps the row. A token that vanishes from the
+  list is indistinguishable from one that never existed, and the list is the only
+  interface an owner has for "which of these was the laptop I lost".
+- `last_seen_at` is written at most once every five minutes. A token check runs on
+  every request; writing on every request would make the answer to "when was this
+  machine last here" the most-written row in the database.
+- In the app it is one button in sync settings: paste the shared token, press
+  **Create this device's token**, and the box is replaced with a token only that
+  machine can use. After that the shared token is not on the machine at all.
+- `/health` reports the auth *mode* and never a device count - it needs no token,
+  so a count would advertise how many credentials exist.
+
+Eight integration tests against the real server and database, and five client
+tests, and one of those exists because of how this went: `DeviceTokenClient`
+deserialised the server's camelCase JSON with default (case-sensitive) options, so
+nothing matched, **no exception was thrown**, and the app got a record of default
+values - `Name` null, `Token` null. The status line said `This device is now ""`
+and the app saved a null token over the working one it already had, locking itself
+out of its own server. The server half had been fully tested and passed; the
+client half had no test at all. A silent wrong answer is worse than a crash, and
+that is the whole argument for the client-side tests.
+
+See [0014-per-device-tokens](decisions/0014-per-device-tokens.md) for what this
+deliberately leaves out: no expiry, no per-device scopes, no accounts.
 ## The shell (Obsidian-shaped)
 
 The window is a deliberate imitation of Obsidian's: a narrow icon ribbon, the

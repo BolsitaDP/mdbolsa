@@ -17,6 +17,15 @@ Hovering a node lights it and its neighbours and fades the rest, which is what m
 the edges readable instead of noise. Click selects, double-click opens the note, and
 **Reset view** puts every dragged node back.
 
+**Tokens you can revoke one at a time.** Sync used to need one shared secret
+that every device presented, which meant a lost laptop revoked the whole thing -
+and, since attachments, that secret could also *upload*. The shared token is now
+just the bootstrap: press **Create this device''s token** in sync settings once and
+this machine gets a credential of its own, listed by name on the server, and
+`DELETE /api/devices/{id}` takes exactly that one away. A device token cannot
+mint more of them, and the server keeps only a hash, so the secret is never
+recoverable - it is revoked and replaced.
+
 **Attachments, and they sync.** Files in `Attachments/` are identified by the hash of
 their contents and named after it, so the same screenshot in three notes is one file
 on every device, and **an attachment cannot conflict** — a hash has exactly one

@@ -224,6 +224,15 @@
                                        FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
                             <TextBox x:Name="SyncServerBox" PlaceholderText="http://localhost:5080" FontSize="12" />
                             <PasswordBox x:Name="SyncTokenBox" PlaceholderText="Sync token" FontSize="12" />
+                            <StackPanel Spacing="4">
+                                <TextBlock x:Name="SyncTokenHelpText" FontSize="11" Opacity="0.7"
+                                           TextWrapping="Wrap"
+                                           Text="Using the shared token. Press Create this device's token once to get one that can be revoked on its own." />
+                                <TextBox x:Name="DeviceNameBox" PlaceholderText="Device name" FontSize="12" />
+                                <Button x:Name="CreateDeviceTokenButton" Content="Create this device's token"
+                                        Click="OnCreateDeviceTokenClicked" HorizontalAlignment="Left"
+                                        ToolTipService.ToolTip="Exchanges the shared token for one only this machine can use" />
+                            </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <Button Content="Save" Click="OnSaveSyncSettingsClicked" />
                                 <Button Content="Cancel" Click="OnSyncSettingsRibbonClicked" />

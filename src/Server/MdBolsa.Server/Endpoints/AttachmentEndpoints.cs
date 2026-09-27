@@ -20,15 +20,14 @@ namespace MdBolsa.Server.Endpoints;
 // response here is ever a conflict. See docs/decisions/0011-attachments.md.
 public static class AttachmentEndpoints
 {
-    public static IEndpointRouteBuilder MapAttachmentEndpoints(this IEndpointRouteBuilder app, string? token)
+    public static IEndpointRouteBuilder MapAttachmentEndpoints(this IEndpointRouteBuilder app, TokenAuthenticator auth)
     {
         var attachments = app.MapGroup("/api/attachments").WithTags("attachments");
 
-        attachments.AddEndpointFilter(async (context, next) =>
-        {
-            var presented = context.HttpContext.Request.Headers[SyncHeaders.Token].ToString();
-            return TokenValidator.IsValid(presented, token) ? await next(context) : Results.Unauthorized();
-        });
+        // Same check as the note routes. A device token can upload, which is the
+        // whole reason this phase exists: with a shared token, whoever holds it
+        // spends this server's disk.
+        attachments.AddEndpointFilter(TokenAuthFilter.ForGroup(auth));
 
         attachments.MapGet("/", async Task<IResult> (AttachmentStore store, CancellationToken ct) =>
             Results.Ok(await store.ListAsync(ct)));

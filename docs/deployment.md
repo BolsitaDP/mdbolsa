@@ -18,15 +18,60 @@ dotnet run --project src/Server/MdBolsa.Server
 ```
 
 The API listens on <http://localhost:5080>. `GET /health` reports the
-environment, the database it resolved, the schema version, and that there is no
-authentication:
+environment, the database it resolved, the schema version, and which
+authentication is in force:
 
 ```json
 {"status":"ok","environment":"Development","database":"localhost/mdbolsa_dev",
- "schemaVersion":"1","authentication":"none"}
+ "schemaVersion":"3","authentication":"shared token (development default) + per-device tokens"}
 ```
 
 The schema is created on boot, so there is no migration step to run.
+
+## Adding a device, and taking one away
+
+The shared token (`Sync:Token`, or `Mdb:Token` in appsettings) is the only
+credential that can manage devices. Everything below needs it, and a device
+token gets **401** on all of it - one stolen laptop must not be able to hand
+itself a permanent key.
+
+Give a machine its own token:
+
+```bash
+# one-time: paste this into the app's sync settings and press
+# "Create this device's token"
+curl -X POST http://localhost:5080/api/devices \
+  -H "X-MdBolsa-Token: $MDBOLSA_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"work laptop"}'
+```
+
+The response is the **only** time the token exists outside that machine: the
+server kept `sha256(token)` and cannot reproduce it. Lose it, and the answer is
+to revoke and mint another - not to look it up.
+
+See what has access, and when each was last here:
+
+```bash
+curl http://localhost:5080/api/devices -H "X-MdBolsa-Token: $MDBOLSA_TOKEN"
+```
+
+```json
+[{"id":"...","name":"work laptop","createdAt":"...","lastSeenAt":"...","revoked":false}]
+```
+
+Take one away. It stops working on the next request, and no other device is
+affected:
+
+```bash
+curl -X DELETE http://localhost:5080/api/devices/$ID -H "X-MdBolsa-Token: $MDBOLSA_TOKEN"
+```
+
+Revoked devices stay in the list, marked revoked, so "which of these was the
+phone I gave away" has an answer. `lastSeenAt` is written at most once every
+five minutes: it answers "when was this machine last here", not "when did this
+request happen".
+
 
 Verify the API end to end:
 

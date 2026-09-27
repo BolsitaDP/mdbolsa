@@ -18,15 +18,12 @@ namespace MdBolsa.Server.Endpoints;
 // docs/decisions/0012-conflict-resolution.md.
 public static class ConflictEndpoints
 {
-    public static IEndpointRouteBuilder MapConflictEndpoints(this IEndpointRouteBuilder app, string? token)
+    public static IEndpointRouteBuilder MapConflictEndpoints(this IEndpointRouteBuilder app, TokenAuthenticator auth)
     {
         var notes = app.MapGroup("/api/notes").WithTags("conflicts");
 
-        notes.AddEndpointFilter(async (context, next) =>
-        {
-            var presented = context.HttpContext.Request.Headers[SyncHeaders.Token].ToString();
-            return TokenValidator.IsValid(presented, token) ? await next(context) : Results.Unauthorized();
-        });
+        // Same check as /api/notes, and the same object doing it.
+        notes.AddEndpointFilter(TokenAuthFilter.ForGroup(auth));
 
         notes.MapGet("/{id:guid}/versions", async Task<IResult> (
             Guid id,
