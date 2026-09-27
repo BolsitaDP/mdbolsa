@@ -29,6 +29,34 @@ public partial class App : Application
     /// </summary>
     public App()
     {
+        // First-chance logging, and only in a debug build. This app dies to a
+        // *native* stowed exception (0xc000027b) that never surfaces as a managed
+        // one, so the Application event log says "something went wrong in
+        // Microsoft.UI.Xaml.dll" and nothing else. With this, the last thing the app
+        // tried before it went is written down, which is the difference between
+        // bisecting the XAML by guesswork and bisecting it by evidence.
+        //
+        // Cheap enough to leave on for development, and compiled out of Release.
+#if DEBUG
+        AppDomain.CurrentDomain.FirstChanceException += (_, e) =>
+        {
+            try
+            {
+                var log = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "mdbolsa-firstchance.log");
+
+                File.AppendAllText(
+                    log,
+                    $"{DateTime.Now:HH:mm:ss.fff} {e.Exception.GetType().Name}: {e.Exception.Message}\r\n");
+            }
+            catch (IOException)
+            {
+                // A diagnostic that cannot write is not worth failing over.
+            }
+        };
+#endif
+
         InitializeComponent();
     }
 

@@ -61,13 +61,22 @@
                                 <VisualStateManager.VisualStateGroups>
                                     <VisualStateGroup x:Name="CommonStates">
                                         <VisualState x:Name="Normal" />
+                                        <!--
+                                            The hover is a layer whose Opacity is
+                                            animated, NOT the Background being animated.
+                                            A DoubleAnimation can only animate a double,
+                                            and Background is a Brush - pointing one at
+                                            it took the process down intermittently,
+                                            including with no input at all, because the
+                                            pointer-over state fires by itself when the
+                                            window first appears under the cursor.
+                                        -->
                                         <VisualState x:Name="PointerOver">
                                             <Storyboard>
                                                 <DoubleAnimation
-                                                    Storyboard.TargetName="Root"
-                                                    Storyboard.TargetProperty="Background"
-                                                    To="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                                    Duration="0:0:0.1" />
+                                                    Storyboard.TargetName="HoverLayer"
+                                                    Storyboard.TargetProperty="Opacity"
+                                                    To="1" Duration="0:0:0.1" />
                                             </Storyboard>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
@@ -80,6 +89,8 @@
                                         </VisualState>
                                     </VisualStateGroup>
                                 </VisualStateManager.VisualStateGroups>
+                                <Border x:Name="HoverLayer" CornerRadius="4" Opacity="0"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}" />
                                 <ContentPresenter
                                     Padding="{TemplateBinding Padding}"
                                     HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"

@@ -48,6 +48,10 @@ public sealed partial class MainPage : Page
     // than an open folder.
     private readonly HashSet<string> _collapsedFolders = new(StringComparer.OrdinalIgnoreCase);
 
+    // The note rows currently in the tree, so opening a note can move the
+    // selection without rebuilding anything. See HighlightOpenNote.
+    private readonly Dictionary<string, Button> _noteRows = new(StringComparer.Ordinal);
+
     public MainPage()
     {
         InitializeComponent();
@@ -136,7 +140,6 @@ public sealed partial class MainPage : Page
         AppSession.VaultPath = path;
         AppSession.RememberVaultPath(path);
         VaultNameText.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
-        ToolTipService.SetToolTip(VaultNameText, path);
 
         ShowTree();
         RescanAndRefreshList();
@@ -261,9 +264,7 @@ public sealed partial class MainPage : Page
     {
         var hiding = LeftSidebar.Visibility == Visibility.Visible;
         LeftSidebar.Visibility = hiding ? Visibility.Collapsed : Visibility.Visible;
-        ToolTipService.SetToolTip(
-            ToggleLeftSidebarButton,
-            hiding ? "Show the file list (Ctrl+B)" : "Hide the file list (Ctrl+B)");
+
     }
 
     private void OnToggleRightSidebarClicked(object sender, RoutedEventArgs e) => ToggleRightSidebar();
@@ -272,9 +273,7 @@ public sealed partial class MainPage : Page
     {
         var hiding = RightSidebar.Visibility == Visibility.Visible;
         RightSidebar.Visibility = hiding ? Visibility.Collapsed : Visibility.Visible;
-        ToolTipService.SetToolTip(
-            ToggleRightSidebarButton,
-            hiding ? "Show note details (Ctrl+I)" : "Hide note details (Ctrl+I)");
+
     }
 
     // The vault as a folder tree, rendered flat with one row per node and an
@@ -285,6 +284,7 @@ public sealed partial class MainPage : Page
     private void RenderTree()
     {
         TreeList.Children.Clear();
+        _noteRows.Clear();
         if (AppSession.VaultPath is null) return;
 
         var tree = VaultTree.Build(_notesById.Values);
@@ -349,7 +349,12 @@ public sealed partial class MainPage : Page
                 folderRow.Click += (_, _) =>
                 {
                     if (!_collapsedFolders.Remove(captured)) _collapsedFolders.Add(captured);
-                    RenderTree();
+
+                    // Deferred, and not for timing: the row being clicked is a child
+                    // of the tree this rebuilds, so clearing the tree now would remove
+                    // the control whose event is still being dispatched. Same
+                    // re-entrancy that crashes on opening a note.
+                    DispatcherQueue.TryEnqueue(RenderTree);
                 };
 
                 panel.Children.Add(folderRow);
@@ -380,6 +385,7 @@ public sealed partial class MainPage : Page
             var path = relativePath;
             noteRow.Click += (_, _) => ShowAndEditNote(path);
             AddNoteContextMenu(noteRow, path);
+            _noteRows[path] = noteRow;
             panel.Children.Add(noteRow);
         }
     }
@@ -518,7 +524,6 @@ public sealed partial class MainPage : Page
                 Style = (Style)Application.Current.Resources["SidebarRowStyle"],
                 Content = content,
             };
-            ToolTipService.SetToolTip(button, note.RelativePath);
 
             var path = note.RelativePath;
             button.Click += (_, _) => ShowAndEditNote(path);
@@ -1160,10 +1165,27 @@ public sealed partial class MainPage : Page
         ShowBacklinks(relativePath);
         ShowWordCount(content);
 
-        // The tree highlights the open note, so a full repaint here keeps the
-        // selection in step with the editor. Cheap at personal-vault scale, and
-        // RenderTree is a no-op when a search or tag view is showing.
-        if (_activeQuery is null && _activeTag is null) RenderTree();
+        if (_activeQuery is null && _activeTag is null) HighlightOpenNote();
+    }
+
+    // Moves the selection highlight to the open note by swapping two styles on
+    // rows that already exist.
+    //
+    // It is deliberately not a full RenderTree. A row's Click handler runs while
+    // the button is still part of its panel, and clearing that panel takes away
+    // the very control the event is being dispatched from - a re-entrant mutation
+    // that this runtime answers with a stowed native exception. Restyling the old
+    // and new rows in place is also less disruptive: no flicker, and the tree
+    // keeps its scroll position.
+    private void HighlightOpenNote()
+    {
+        foreach (var (path, row) in _noteRows)
+        {
+            var wanted = (Style)Application.Current.Resources[
+                path == _currentRelativePath ? "SidebarRowSelectedStyle" : "SidebarRowStyle"];
+
+            if (!ReferenceEquals(row.Style, wanted)) row.Style = wanted;
+        }
     }
 
     private void ShowWordCount(string content)
@@ -1235,7 +1257,6 @@ public sealed partial class MainPage : Page
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 },
             };
-            ToolTipService.SetToolTip(button, backlinkNote.RelativePath);
 
             var path = backlinkNote.RelativePath;
             button.Click += (_, _) => ShowAndEditNote(path);
@@ -1262,12 +1283,16 @@ public sealed partial class MainPage : Page
             var notes = vaultIndex.GetAll().OrderBy(n => n.RelativePath).ToList();
             _notesById = notes.ToDictionary(n => n.Id);
 
-            // The edit can have added or removed tags, so the tag panel, the note's
-            // metadata and the sidebar are all stale now.
+            // The edit can have added or removed tags, so the tag panel and the
+            // note's metadata are stale. The tree is not: writing to a note cannot
+            // create, move or delete one, and this method also runs from inside the
+            // click handler that opened the note, so it must not rebuild the panel
+            // that click came from.
             PopulateTagsPanel();
             ShowNoteMetadata(_currentRelativePath, text);
-            RefreshView();
-            RenderTree();
+
+            if (_activeQuery is not null || _activeTag is not null) RefreshView();
+            else HighlightOpenNote();
 
             EditorStatusText.Text = $"Editing {_currentRelativePath} (saved {DateTime.Now:T})";
             StatusText.Text = "Saved.";

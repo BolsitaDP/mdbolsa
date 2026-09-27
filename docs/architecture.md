@@ -361,6 +361,37 @@ fine" went unverified for nine phases. It is possible, and worth doing:
   `SidebarRowStyle` has the same shape of template and works, because its content
   is text - which is exactly why this was worth chasing down rather than working
   around.
+- **A `DoubleAnimation` pointed at `Background` crashes the process.** A
+  `DoubleAnimation` can only animate a double, and `Background` is a `Brush`. It
+  did not crash on demand: it went off whenever the pointer-over state fired, which
+  includes **by itself** the moment the window appears under the cursor, so the app
+  died a few seconds after launch with nobody touching it - and, before that, every
+  time someone moved the mouse over a sidebar row. Which is why "clicking a note
+  crashes" and "it crashes on startup" turned out to be the same bug. The hover is
+  now a separate `Border` whose `Opacity` is animated, which is a real double.
+- **Ribbon icon geometry: one `Path` per icon, no `Ellipse`, no line caps or joins.**
+  Bisected by launch, not by reading. With `Ellipse` nodes inside nested `Grid`s and
+  `StrokeStartLineCap`/`StrokeEndLineCap`/`StrokeLineJoin` attributes, the app died
+  on roughly one launch in three with nothing happening; strip the shapes out and
+  four consecutive launches were clean; put back a single `Path` per icon and five
+  more were clean. Which of the two changes did it is **not established** - the
+  bisect says "the icon shapes", not which part of them - so the rule here is the
+  conservative one: simplest geometry that draws the shape, and if an icon needs a
+  circle, use the framework's own drawing rather than a trick. A circle drawn as
+  two identical arc commands is already known to be fatal; treat that as a symptom
+  of the same area.
+- **Opening a note must not rebuild the tree.** A row's `Click` runs while the button
+  is still a child of its panel, so clearing that panel removes the control the
+  event is being dispatched from. It is the same re-entrancy as the `Loaded` crash
+  above, and it is a crash the user hits on the first thing they do. The selection
+  highlight now swaps two styles on rows that already exist, folding a folder defers
+  the rebuild to the next dispatcher cycle, and saving a note does not repaint the
+  tree at all - writing to a note cannot create, move or delete one.
+- **No `ToolTipService.SetToolTip` in code.** A tooltip is a popup, and popups are
+  what this runtime kills the process over. Attaching one to a row while the pointer
+  is on that row runs the popup machinery in the middle of a click. The static
+  `ToolTipService.ToolTip` attributes in the XAML are fine - they are attached once
+  at load, and the ribbon is unusable without them.
 
 - **WinUI 3 `TextBox.Text` getter crashed the process natively**, on
   this machine's WindowsAppSDK 2.4.0 (preview) build, when reading back
