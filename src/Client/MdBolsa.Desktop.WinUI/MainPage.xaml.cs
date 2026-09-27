@@ -53,6 +53,23 @@ public sealed partial class MainPage : Page
     // selection without rebuilding anything. See HighlightOpenNote.
     private readonly Dictionary<string, Button> _noteRows = new(StringComparer.Ordinal);
 
+    // Ctrl+P. The switcher is the same sidebar view as search, in a different
+    // mood: a query is a *name* you half-remember, not words you remember from
+    // inside a note, so name matches come first and the text index is the fallback.
+    // With an empty query it shows what you have been reading, because that is what
+    // a switcher opened with no intention in mind is usually for.
+    private bool _switcherMode;
+
+    // Most recently opened first. In memory for the session on purpose: this is a
+    // convenience, and a remembered list that is wrong or stale is worse than no
+    // list. The vault's own files remain the only source of truth.
+    private readonly List<string> _recentlyOpened = [];
+
+    // What the flat list is currently showing, so Enter can open the first one.
+    private IReadOnlyList<NoteMetadata> _flatResults = [];
+
+
+
     // --- Automatic sync (Phase 9 follow-up) --------------------------------
 
     // Sync used to be a button you pressed, which means a second device's edits
@@ -280,14 +297,18 @@ public sealed partial class MainPage : Page
     private void OnSaveAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
         SaveCurrentNote();
 
-    private void OnFindAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+    private void OnFindAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        _switcherMode = false;
         FocusSearch();
+    }
 
-    // Ctrl+P is Obsidian's quick switcher. There isn't one yet, and sending it to
-    // search is the nearest honest thing: both are "type a name, go there".
+    // Ctrl+P is Obsidian's quick switcher, and now there is one: the sidebar's
+    // search view in a different mood - name matches first, and the notes you have
+    // been reading when you have nothing typed yet.
     private void OnQuickSwitcherAccelerator(
         KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
-        FocusSearch();
+        ShowQuickSwitcher();
 
     private void OnToggleLeftAccelerator(
         KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
@@ -350,7 +371,10 @@ public sealed partial class MainPage : Page
 
     private void OnNotesRibbonClicked(object sender, RoutedEventArgs e)
     {
+        _switcherMode = false;
+        _flatResults = [];
         SearchBox.Text = string.Empty;
+        SearchBox.PlaceholderText = "Search notes (Ctrl+F)";
         PopulateTagsPanel();
         ShowTree();
     }
@@ -494,11 +518,51 @@ public sealed partial class MainPage : Page
     // app's crash history (docs/architecture.md) makes anything that mutates
     // controls from a text input's own event a thing to avoid on purpose rather
     // than by luck.
+    private void OnSearchClicked(object sender, RoutedEventArgs e)
+    {
+        // If the box says something different from what the list on screen was built
+        // from, this is a new search. If it says the same thing, a second click means
+        // "open the top one" - which is the switcher's whole interaction, available
+        // without a keyboard.
+        //
+        // Comparing the text is how this knows, rather than a flag set from
+        // TextChanged: watching the box to drive the list is the pattern this app
+        // deliberately does not use (see docs/architecture.md's Known Issues).
+        if (_flatResults.Count > 0 && SearchBox.Text.Trim() == _activeQuery)
+        {
+            ShowAndEditNote(_flatResults[0].RelativePath);
+            return;
+        }
+
+        RunSearch();
+    }
+
     private void OnSearchBoxKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key != VirtualKey.Enter) return;
-        e.Handled = true;
-        RunSearch();
+        switch (e.Key)
+        {
+            case VirtualKey.Enter:
+                e.Handled = true;
+
+                // Enter in the search box opens the top result, which is the whole
+                // point of a switcher: type a few letters, press Enter, done. With
+                // results on screen it is the only sensible thing Enter can mean,
+                // and without them it falls back to running the search.
+                if (_flatResults.Count > 0) ShowAndEditNote(_flatResults[0].RelativePath);
+                else RunSearch();
+                break;
+
+            case VirtualKey.Escape:
+                // Escape leaves the switcher and puts the file list back, rather than
+                // clearing the box: you opened this to go somewhere, and the box is
+                // where you were typing, not a dialog to dismiss.
+                if (_switcherMode || SearchBox.Text.Length > 0)
+                {
+                    e.Handled = true;
+                    OnClearSearchClicked(this, new RoutedEventArgs());
+                }
+                break;
+        }
     }
 
 
@@ -514,6 +578,7 @@ public sealed partial class MainPage : Page
         var query = SearchBox.Text.Trim();
         if (query.Length == 0)
         {
+            if (_switcherMode) { ShowRecentNotes(); return; }
             OnClearSearchClicked(this, new RoutedEventArgs());
             return;
         }
@@ -526,23 +591,87 @@ public sealed partial class MainPage : Page
         _activeQuery = query;
         PopulateTagsPanel();
 
-        var results = AppSession.OpenSearchIndex().Search(query);
-        var notes = results
+        // Names first, then the text index, and never the same note twice. A query
+        // in a switcher is usually a name someone half-remembers; FTS alone would
+        // rank a long note that happens to contain the word above the note that is
+        // actually called it.
+        var nameMatches = NoteNameMatcher.Match(_notesById.Values, query, limit: 15);
+        var alreadyListed = new HashSet<Guid>(nameMatches.Select(match => match.Note.Id));
+
+        var textMatches = AppSession.OpenSearchIndex().Search(query)
             .Select(result => _notesById.GetValueOrDefault(result.NoteId))
+            .Where(note => note is not null && !alreadyListed.Contains(note.Id))
+            .Select(note => note!)
+            .ToList();
+
+        var notes = nameMatches.Select(match => match.Note).Concat(textMatches).ToList();
+
+        StatusText.Text = nameMatches.Count > 0
+            ? $"{notes.Count} result(s) for \"{query}\" - {nameMatches.Count} by name."
+            : $"{notes.Count} result(s) for \"{query}\"." +
+              (clearedTag ? " Tag filter cleared." : string.Empty);
+
+        // A name match says which folder it is in; a text match says why it matched.
+        // One line, and which line is the useful one depends on how it was found.
+        PopulateFlatList(
+            notes,
+            note => textMatches.Contains(note) ? SnippetFor(note, query) : FolderOf(note),
+            $"SEARCH  \"{query}\"  ·  {notes.Count} match(es)");
+
+        ShowSidebarView(FlatListPanel);
+    }
+
+    // "Personal/" - the folder, or nothing for a note at the vault root, which is
+    // already obvious from where it sits in the tree.
+    private static string? FolderOf(NoteMetadata note)
+    {
+        var slash = note.RelativePath.LastIndexOf('/');
+        return slash < 0 ? null : note.RelativePath[..(slash + 1)];
+    }
+
+    private void ShowQuickSwitcher()
+    {
+        _switcherMode = true;
+
+        // Ctrl+P is Obsidian's quick switcher. Folding the file list away would
+        // hide the thing the switcher is replacing, so it opens the sidebar and puts
+        // the cursor in the box.
+        if (LeftSidebar.Visibility != Visibility.Visible) ToggleLeftSidebar();
+
+        SearchBox.PlaceholderText = "Go to a note by name (Ctrl+P)";
+        SearchBox.Focus(FocusState.Programmatic);
+        SearchBox.SelectAll();
+        ShowRecentNotes();
+    }
+
+    private void ShowRecentNotes()
+    {
+        var notes = _recentlyOpened
+            .Select(path => _notesById.Values.FirstOrDefault(note => note.RelativePath == path))
             .Where(note => note is not null)
             .Select(note => note!)
             .ToList();
 
-        StatusText.Text = $"{notes.Count} result(s) for \"{query}\"." +
-            (clearedTag ? " Tag filter cleared." : string.Empty);
-
-        PopulateFlatList(notes, snippetFor: query, header: $"SEARCH  \"{query}\"  ·  {notes.Count} match(es)");
+        PopulateFlatList(notes, secondary: null, header: "RECENT");
         ShowSidebarView(FlatListPanel);
+        StatusText.Text = notes.Count == 0
+            ? "Type part of a note's name."
+            : "Type part of a note's name, or pick one of these.";
+    }
+
+    private void RememberOpened(string relativePath)
+    {
+        _recentlyOpened.Remove(relativePath);
+        _recentlyOpened.Insert(0, relativePath);
+        if (_recentlyOpened.Count > 10) _recentlyOpened.RemoveAt(_recentlyOpened.Count - 1);
     }
 
     private void OnClearSearchClicked(object sender, RoutedEventArgs e)
     {
+        _switcherMode = false;
+        _flatResults = [];
         SearchBox.Text = string.Empty;
+        SearchBox.PlaceholderText = "Search notes (Ctrl+F)";
         ShowTree();
         StatusText.Text = $"Showing all {_notesById.Count} note(s).";
     }
@@ -568,7 +697,7 @@ public sealed partial class MainPage : Page
             .OrderBy(note => note.RelativePath)
             .ToList();
 
-        PopulateFlatList(notes, snippetFor: null, header: $"#{_activeTag}  ·  {notes.Count} note(s)");
+        PopulateFlatList(notes, secondary: null, header: $"#{_activeTag}  ·  {notes.Count} note(s)");
         ShowSidebarView(FlatListPanel);
         StatusText.Text = $"Filtering by #{_activeTag}. Click the tag again to clear.";
     }
@@ -577,8 +706,9 @@ public sealed partial class MainPage : Page
     // the matched line for search and nothing for the others, so a result says why
     // it matched when there is a "why".
     private void PopulateFlatList(
-        IReadOnlyList<NoteMetadata> notes, string? snippetFor, string header)
+        IReadOnlyList<NoteMetadata> notes, Func<NoteMetadata, string?>? secondary, string header)
     {
+        _flatResults = notes;
         NotesList.Children.Clear();
         FlatListHeader.Text = header;
 
@@ -603,11 +733,12 @@ public sealed partial class MainPage : Page
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
 
-            if (snippetFor is not null)
+            var secondaryText = secondary?.Invoke(note);
+            if (!string.IsNullOrWhiteSpace(secondaryText))
             {
                 content.Children.Add(new TextBlock
                 {
-                    Text = SnippetFor(note, snippetFor),
+                    Text = secondaryText,
                     FontSize = 11,
                     Opacity = 0.65,
                     MaxLines = 2,
@@ -1260,7 +1391,7 @@ public sealed partial class MainPage : Page
                 .Select(note => note!)
                 .ToList();
 
-            PopulateFlatList(notes, _activeQuery, $"SEARCH  \"{_activeQuery}\"  ·  {notes.Count} match(es)");
+            PopulateFlatList(notes, note => SnippetFor(note, _activeQuery), $"SEARCH  \"{_activeQuery}\"  ·  {notes.Count} match(es)");
             ShowSidebarView(FlatListPanel);
             StatusText.Text = statusPrefix is null
                 ? $"{notes.Count} result(s) for \"{_activeQuery}\"."
@@ -1274,7 +1405,7 @@ public sealed partial class MainPage : Page
                 .OrderBy(note => note.RelativePath)
                 .ToList();
 
-            PopulateFlatList(notes, snippetFor: null, header: $"#{_activeTag}  ·  {notes.Count} note(s)");
+            PopulateFlatList(notes, secondary: null, header: $"#{_activeTag}  ·  {notes.Count} note(s)");
             ShowSidebarView(FlatListPanel);
             StatusText.Text = statusPrefix is null
                 ? $"Filtering by #{_activeTag}: {notes.Count} note(s)."
@@ -1455,6 +1586,8 @@ public sealed partial class MainPage : Page
         }
 
         AppSession.CurrentNoteRelativePath = relativePath;
+        if (relativePath is not null) RememberOpened(relativePath);
+
         EditorStatusText.Text = relativePath is null ? "Select a note to edit." : $"Editing {relativePath}";
         NoteTitleText.Text = relativePath is null
             ? "No note selected"

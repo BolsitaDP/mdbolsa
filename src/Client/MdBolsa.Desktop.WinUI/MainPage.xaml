@@ -165,10 +165,31 @@
                     </Grid>
 
                     <!-- search: applied on Enter, never on every keystroke -->
-                    <TextBox x:Name="SearchBox" Grid.Row="1" Margin="10,0,10,8"
-                             PlaceholderText="Search notes (Ctrl+F)" FontSize="13"
-                             Padding="8,5,8,5" CornerRadius="4"
-                             KeyDown="OnSearchBoxKeyDown" />
+                    <!--
+                        A search field you can only submit with one particular key is a
+                        field some people cannot use at all, so there is a button. It
+                        is not decoration either: this search deliberately does not
+                        filter as you type, because rebuilding a list of controls from
+                        inside a text input's own event is one of the patterns that
+                        crashes this runtime (see docs/architecture.md). Enter works
+                        too, and this works for everyone.
+                    -->
+                    <Grid Grid.Row="1" Margin="10,0,10,8" ColumnSpacing="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="SearchBox" PlaceholderText="Search notes (Ctrl+F)"
+                                 FontSize="13" Padding="8,5,8,5" CornerRadius="4"
+                                 KeyDown="OnSearchBoxKeyDown" />
+                        <Button Grid.Column="1" x:Name="SearchButton" Click="OnSearchClicked"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTipService.ToolTip="Search (Enter)"
+                                AutomationProperties.Name="Run search">
+                            <Path Data="M 10,3 A 6,6 0 1 1 9.9,3 M 14.5,14.5 L 20,20"
+                                  Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.4" />
+                        </Button>
+                    </Grid>
 
                     <!--
                         The sidebar's one content area, swapped between four views

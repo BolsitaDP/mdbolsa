@@ -10,6 +10,15 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
+**Search and a quick switcher.** Typing part of a note's *name* finds it, even when
+the name never appears in the note itself - which is what FTS5, an index over note
+text, structurally cannot do. Matches rank exact, then prefix, then word-start, then
+anywhere, and the full-text index is the fallback rather than the first answer.
+`Ctrl+P` opens the switcher, which shows what you have been reading when you have
+nothing typed yet. The search field has a submit button as well as Enter, because
+filtering as you type is one of the patterns that crashes this runtime and a field
+only one key can submit is a field some people cannot use.
+
 **Sync happens on its own now.** Opening a vault syncs once, edits made on another
 device arrive every five minutes, and a burst of saves is pushed once after twenty
 seconds of quiet - none of it on the save path, so typing never waits for the

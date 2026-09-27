@@ -375,6 +375,33 @@ someone uses all day should be one they already know how to drive.
   arc: a circle drawn as two identical arc commands is a trick that parses and then
   takes the renderer down.
 
+### Search and the quick switcher
+
+FTS5 already ranked by bm25 and indexed titles, so what was missing was not
+relevance - it was that **FTS cannot find a note by its name**. Someone opening a
+note they already know the name of is not looking for words they remember from
+inside it, and a tool that makes them do that has misunderstood the request.
+
+- `NoteNameMatcher` (Core, 21 tests) ranks name matches **exact, prefix, word-start,
+  anywhere**, and stops there on purpose. A fuzzy subsequence matcher scores almost
+  anything three letters long as a near-match, which makes the top result a coin
+  toss - and the whole point of a switcher is that the first result is the one you
+  meant, because you press Enter without reading. Six confident results beat sixty
+  speculative ones.
+- Accents and case are folded **for matching only**. "informacion" has to find
+  "Información", because filenames here are written without accents most of the
+  time, so that is what people type. Folding changes the *kind* of match too, which
+  is correct: a query of "informacion" against a note called `informacion.md` is an
+  exact match, not a prefix.
+- The switcher is the sidebar's search view in a different mood: name matches
+  first, the text index as the fallback, and never the same note twice. With nothing
+  typed it shows what you have been reading, which is what a switcher opened with no
+  intention in mind is usually for.
+- The search field has a **submit button**, not just Enter. This is not decoration:
+  the search deliberately does not filter as you type, because rebuilding a list of
+  controls from inside a text input's own event is one of the patterns that crashes
+  this runtime. A field that can only be submitted with one particular key is a
+  field some people cannot use at all.
 ## Seeing the UI from the shell
 
 Screenshotting this app used to be impossible from here, which is why "it looks
