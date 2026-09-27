@@ -72,15 +72,22 @@ internal sealed class FlowchartPresenter
     {
         var canvas = new Canvas { Background = new SolidColorBrush(Colors.Transparent) };
 
-        // A diagram too big for the pane is scrolled, not shrunk to illegibility -
-        // see FlowchartLayout.MinimumScale, which is the other half of that
-        // decision. Auto on both axes, so a small diagram gets no bars at all.
+        // Horizontal scrolling only, and deliberately so. A diagram that is too wide
+        // for the pane has to scroll sideways - there is nowhere else for it to go -
+        // but it must not scroll *vertically*, because a second vertical scrollbar
+        // inside the page's own traps the wheel: hovering the diagram and scrolling
+        // moved the diagram, and scrolling the page meant moving the mouse off it
+        // first. With vertical scrolling off, a vertical wheel gesture has nowhere
+        // to go here and carries on to the page.
+        //
+        // The diagram is instead laid out at its natural height, so there is nothing
+        // to scroll vertically in the first place.
         var scroller = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             HorizontalScrollMode = ScrollMode.Auto,
-            VerticalScrollMode = ScrollMode.Auto,
+            VerticalScrollMode = ScrollMode.Disabled,
             IsTabStop = false,
             Content = canvas,
         };
@@ -91,10 +98,7 @@ internal sealed class FlowchartPresenter
             BorderThickness = new Thickness(1),
             BorderBrush = new SolidColorBrush(Presentation.NodeBorder),
             Background = new SolidColorBrush(Color.FromArgb(120, 20, 22, 26)),
-            // Tall enough for a small diagram to read, short enough that a note
-            // with three of them is still a note and not a wall of boxes.
-            MinHeight = 200,
-            MaxHeight = 460,
+            MinHeight = 160,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Child = scroller,
         };
@@ -402,10 +406,18 @@ internal sealed class FlowchartPresenter
 
     private void Relayout(double width, double height)
     {
-        var positions = FlowchartLayout.Compute(_chart, width, height, out var scale)
+        // Natural height, not the pane's height: the diagram is as tall as it wants
+        // and the page scrolls. Only the width is a constraint.
+        var positions = FlowchartLayout.ComputeFlowing(_chart, width, out var naturalHeight)
             .ToDictionary(p => p.NodeId);
 
         if (positions.Count == 0) return;
+
+        // The scale that was applied is the one the flowing layout chose, which
+        // ComputeFlowing does not surface. Asking again for the same width is
+        // cheap and keeps the two answers in step.
+        FlowchartLayout.Compute(_chart, width, 1_000_000, out var scale);
+
 
         // The font scales with the diagram. Without this the boxes shrink and the
         // text does not, and a box that fits eight characters of a seventeen
@@ -491,13 +503,20 @@ internal sealed class FlowchartPresenter
         }
 
         // Give the canvas the size of what is on it, so the ScrollViewer knows
-        // there is something to scroll to. Without an explicit size a Canvas
-        // reports no extent at all and the scrollbars never appear - which would
-        // make MinimumScale silently hide part of the diagram.
-        var (contentWidth, contentHeight) = FlowchartLayout.Bounds(positions.Values.ToList());
+        // there is something to scroll sideways to. Without an explicit size a
+        // Canvas reports no extent at all and the scrollbar never appears - which
+        // would make MinimumScale silently hide part of the diagram.
+        //
+        // Width is at least the pane, so a small diagram is left-aligned rather
+        // than floating in the middle of an empty bar. Height is the natural
+        // height, with a floor so a two-node diagram is not a thin strip.
+        var (contentWidth, _) = FlowchartLayout.Bounds(positions.Values.ToList());
         _canvas.Width = Math.Max(contentWidth, width);
-        _canvas.Height = Math.Max(contentHeight, height);
+        _canvas.Height = Math.Max(naturalHeight, MinimumDiagramHeight);
     }
+
+    /// <summary>A small diagram still gets a box you can see and click on.</summary>
+    private const double MinimumDiagramHeight = 150;
 
     private static (double X1, double Y1, double X2, double Y2) Trim(
         DiagramPosition from, DiagramPosition to)

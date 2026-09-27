@@ -295,6 +295,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBox x:Name="Editor" Padding="8"
@@ -302,15 +303,40 @@
                                  IsSpellCheckEnabled="False" BorderThickness="0" Background="Transparent"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto" />
 
-                        <Grid Grid.Column="1" x:Name="PreviewHost" Width="380" Margin="16,0,0,0"
+                        <!--
+                            The divider between the source and the preview.
+
+                            Hand-rolled, because WinUI has no GridSplitter in the box
+                            and the CommunityToolkit one is a dependency for a
+                            fourteen-pixel control. The pointer handlers on it are
+                            deferred to the dispatcher for the same reason the
+                            diagram's relayout is: mutating layout from inside an
+                            input's own event re-enters measure on this runtime and
+                            kills the process. Double-click puts it back.
+                        -->
+                        <Border Grid.Column="1" x:Name="PreviewSplitter" Width="18"
+                                Visibility="Collapsed"
+                                Background="Transparent"
+                                PointerPressed="OnPreviewSplitterPointerPressed"
+                                PointerMoved="OnPreviewSplitterPointerMoved"
+                                PointerReleased="OnPreviewSplitterPointerReleased"
+                                PointerCaptureLost="OnPreviewSplitterPointerReleased"
+                                DoubleTapped="OnPreviewSplitterDoubleTapped"
+                                ToolTipService.ToolTip="Drag to resize the preview. Double-click to reset it.">
+                            <Border Width="2" Height="34" CornerRadius="1"
+                                    VerticalAlignment="Top" Margin="0,6,0,0"
+                                    Background="{ThemeResource DividerBrush}" />
+                        </Border>
+
+                        <Grid Grid.Column="2" x:Name="PreviewHost" Width="380" Margin="0,0,0,0"
                               Visibility="Collapsed">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Rectangle Grid.Column="0" Width="1" Margin="0,0,16,0"
-                                       Fill="{ThemeResource CardStrokeColorDefaultBrush}" />
-                            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+                            <!--
+                                The 1px divider that used to live here is gone: it is
+                                the splitter's line now, and having both drew two rules
+                                a few pixels apart. The splitter carries the grab area
+                                and the line together, so they cannot disagree.
+                            -->
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
                                 <StackPanel x:Name="PreviewPanel" Spacing="10" />
                             </ScrollViewer>
                         </Grid>

@@ -26,6 +26,11 @@ reads as a diagram rather than a hairball. Anything outside that subset -
 the reason and the line number**, because a picture that is quietly wrong is worse
 than one that admits it could not be drawn.
 
+**The preview is yours to size**, and a diagram never steals the wheel: the preview
+has a divider you can drag (double-click to reset, and it remembers), and a
+diagram is laid out at its natural height so the page scrolls instead of the box
+inside it. Two scrollbars, one of them yours to move, and the page always wins.
+
 **Tokens you can revoke one at a time.** Sync used to need one shared secret
 that every device presented, which meant a lost laptop revoked the whole thing -
 and, since attachments, that secret could also *upload*. The shared token is now

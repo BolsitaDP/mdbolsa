@@ -433,6 +433,48 @@ that Known Issues list is for.
 **Not verified**: that the boxes appear. See
 [0015](decisions/0015-mermaid-diagrams.md) for the full reasoning, including why
 the canvas is the second half rather than the first.
+### A second scrollbar is always a mistake
+
+"Hovering a diagram and scrolling scrolled the *diagram*, and scrolling the page
+meant moving the mouse off it first." Correct, and the cause was structural: the
+diagram was in a `ScrollViewer` on both axes inside a pane that scrolls
+vertically. A reader then has to work out which scrollbar the wheel belongs to,
+and the wrong guess looks like a broken window.
+
+So a diagram has **no vertical scroll of its own**. `FlowchartLayout.ComputeFlowing`
+lays it out against a width only, shifts the result to the origin, and returns the
+natural height - height is an *output*, not a constraint. The frame has no
+`MaxHeight`, so the box grows to fit and the page's own scrollbar is the only
+vertical one. The diagram's scroller keeps horizontal scrolling, because a wide
+diagram has nowhere else to go, and with vertical scrolling disabled a vertical
+wheel gesture has nowhere to go *there* and carries on to the page.
+
+Verified through UIAutomation rather than by eye: the diagram's scroller reports
+`VerticallyScrollable = False, HorizontallyScrollable = True`, and the pane beside
+it is the vertical one.
+
+### The preview is resizable
+
+`PreviewHost` was a fixed 380px. It is now dragged by a hand-rolled splitter -
+WinUI has no `GridSplitter` in the box, and the CommunityToolkit one is a
+dependency for a fourteen-pixel control. Drag it, double-click to reset, and the
+width is kept in `AppSession` because a window that forgets how you sized a pane
+on every launch is a window you set up again every morning.
+
+The width is *recorded* during the drag and *applied* on the next dispatcher turn.
+That is not fastidiousness, it is the same crash as the diagram's relayout:
+setting a column's width from inside a `PointerMoved` handler re-enters layout
+while the tree is mid-measure, and this runtime dies with `0xc000027b`. Both
+deferrals are in `MainPage` and both were found by the same crash.
+
+The 1px divider that used to sit inside `PreviewHost` is gone. The splitter draws
+the line and provides the grab area, so the two cannot drift apart - and having
+both drew two rules a few pixels apart.
+
+**Not verified**: dragging the splitter with a real pointer, for the same reason
+the graph's node drag is not - synthetic pointer input does not reach this
+runtime's input stack from this shell. The handler is wired, the width is
+persisted, and the bounds are clamped; it needs a hand on the mouse.
 ## The shell (Obsidian-shaped)
 
 The window is a deliberate imitation of Obsidian's: a narrow icon ribbon, the

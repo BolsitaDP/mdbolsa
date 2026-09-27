@@ -78,6 +78,7 @@ internal static class AppSession
     private const string DeviceIdKey = "MdBolsa.DeviceId";
     private const string ServerUrlKey = "MdBolsa.ServerUrl";
     private const string ServerTokenKey = "MdBolsa.ServerToken";
+    private const string PreviewWidthKey = "MdBolsa.PreviewWidth";
 
     public static Guid DeviceId
     {
@@ -105,6 +106,25 @@ internal static class AppSession
     {
         get => ReadSetting(ServerTokenKey);
         set => WriteSetting(ServerTokenKey, value);
+    }
+
+    /// <summary>
+    /// How wide the preview pane was left, in pixels. Null means "the default".
+    /// A preference, not state: a window that forgets how you sized a pane on every
+    /// launch is a window you have to set up again every morning.
+    /// </summary>
+    public static double? PreviewWidth
+    {
+        get
+        {
+            var stored = ReadSetting(PreviewWidthKey);
+            return double.TryParse(stored, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var width)
+                ? width
+                : null;
+        }
+        set => WriteSetting(PreviewWidthKey, value?.ToString(
+            System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private static string? ReadSetting(string key) =>

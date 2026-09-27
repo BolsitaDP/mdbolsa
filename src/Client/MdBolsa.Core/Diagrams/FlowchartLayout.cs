@@ -81,6 +81,56 @@ public static class FlowchartLayout
             positions.Max(p => p.Y + p.Height / 2) - positions.Min(p => p.Y - p.Height / 2));
     }
 
+    /// <summary>
+    /// Lays the flowchart out against a width only, with the result's top-left at
+    /// the origin, and reports the natural height.
+    ///
+    /// This exists because of a complaint that was entirely fair: hovering a
+    /// diagram and scrolling scrolled *the diagram*, and scrolling the page required
+    /// moving the mouse off it first. A second scrollbar inside the first one is
+    /// always a mistake - the reader has to learn which one the wheel belongs to.
+    ///
+    /// So a diagram has no vertical scroll of its own. It is as tall as it needs to
+    /// be, and the page's own scrollbar is the only vertical one. Height is
+    /// therefore not a constraint here: it is an output.
+    ///
+    /// The height passed to <see cref="Compute"/> is deliberately enormous so the
+    /// vertical axis never binds, and the result is then shifted up to the origin
+    /// because a diagram centred inside a very tall virtual space is still a
+    /// diagram of the same size, just far from the top.
+    /// </summary>
+    public static IReadOnlyList<DiagramPosition> ComputeFlowing(
+        Flowchart flowchart, double width, out double naturalHeight)
+    {
+        if (flowchart.Nodes.Count == 0)
+        {
+            naturalHeight = 0;
+            return [];
+        }
+
+        // Large enough that no realistic diagram is height-constrained by it, and
+        // finite so the arithmetic below is finite too.
+        const int Unconstrained = 1_000_000;
+
+        var positions = Compute(flowchart, width, Unconstrained, out _);
+        if (positions.Count == 0)
+        {
+            naturalHeight = 0;
+            return positions;
+        }
+
+        var top = positions.Min(p => p.Y - p.Height / 2);
+        var left = positions.Min(p => p.X - p.Width / 2);
+
+        naturalHeight = positions.Max(p => p.Y + p.Height / 2) - top;
+
+        return positions.Select(position => position with
+        {
+            X = position.X - left,
+            Y = position.Y - top,
+        }).ToList();
+    }
+
     public static IReadOnlyList<DiagramPosition> Compute(
         Flowchart flowchart, double width, double height) =>
         Compute(flowchart, width, height, out _);

@@ -1149,9 +1149,17 @@ public sealed partial class MainPage : Page
     {
         var showing = PreviewHost.Visibility == Visibility.Visible;
         PreviewHost.Visibility = showing ? Visibility.Collapsed : Visibility.Visible;
+
+        // The divider only exists while there is something to divide.
+        PreviewSplitter.Visibility = PreviewHost.Visibility;
         PreviewRibbonButton.Opacity = showing ? 0.55 : 1;
 
         if (showing) return;
+
+        // Applied on every open, not once at startup: a window restored to a
+        // narrower screen than it was left on should clamp rather than push the
+        // editor off the edge.
+        ApplyPreviewWidth(AppSession.PreviewWidth ?? DefaultPreviewWidth);
 
         RenderPreview(ReadCurrentNoteContent() ?? string.Empty);
     }
@@ -2089,6 +2097,87 @@ public sealed partial class MainPage : Page
     }
 
     // --- Opening and saving a note -----------------------------------------
+
+    // --- Resizing the preview -------------------------------------------------
+
+    private const double DefaultPreviewWidth = 380;
+    private const double MinimumPreviewWidth = 240;
+
+    private bool _resizingPreview;
+    private double _resizeAnchorX;
+    private double _resizeAnchorWidth;
+    private Pointer? _resizePointer;
+
+    /// <summary>
+    /// Drag the divider to change how much room the preview gets.
+    ///
+    /// The width is recorded during the drag and *applied* on the next dispatcher
+    /// turn. That is not fastidiousness: setting a column's width from inside a
+    /// PointerMoved handler re-enters layout while the tree is mid-measure, and this
+    /// runtime dies with a stowed native exception (0xc000027b) when it happens. The
+    /// same fix as the diagram's relayout, for the same reason - and both of them
+    /// are in this file because both were found by the same crash.
+    /// </summary>
+    private void OnPreviewSplitterPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(this);
+
+        _resizingPreview = true;
+        _resizeAnchorX = point.Position.X;
+        _resizeAnchorWidth = PreviewHost.Width;
+
+        if (e.Pointer is not null)
+        {
+            _resizePointer = e.Pointer;
+            PreviewSplitter.CapturePointer(e.Pointer);
+        }
+    }
+
+    private void OnPreviewSplitterPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_resizingPreview) return;
+
+        var x = e.GetCurrentPoint(this).Position.X;
+        var wanted = _resizeAnchorWidth - (x - _resizeAnchorX);
+
+        if (wanted < MinimumPreviewWidth) wanted = MinimumPreviewWidth;
+
+        // Never wider than the window, or the editor is pushed off the left edge and
+        // the note you are editing becomes unreachable.
+        var ceiling = Math.Max(MinimumPreviewWidth, MainContent.ActualWidth - MinimumEditorWidth);
+        if (wanted > ceiling) wanted = ceiling;
+
+        var width = wanted;
+        DispatcherQueue.TryEnqueue(() => PreviewHost.Width = width);
+    }
+
+    private void OnPreviewSplitterPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _resizingPreview = false;
+
+        if (_resizePointer is not null)
+        {
+            PreviewSplitter.ReleasePointerCapture(_resizePointer);
+            _resizePointer = null;
+        }
+
+        // Persisted on release rather than during the drag, so a hundred deferred
+        // writes are not made and abandoned.
+        AppSession.PreviewWidth = PreviewHost.Width;
+    }
+
+    private const double MinimumEditorWidth = 320;
+
+    private void OnPreviewSplitterDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        ApplyPreviewWidth(AppSession.PreviewWidth ?? DefaultPreviewWidth);
+        StatusText.Text = "The preview is back to its usual width.";
+    }
+
+    private void ApplyPreviewWidth(double width)
+    {
+        PreviewHost.Width = Math.Max(width, MinimumPreviewWidth);
+    }
 
     /// <summary>
     /// Turns the preview on for a note that has a diagram in it.

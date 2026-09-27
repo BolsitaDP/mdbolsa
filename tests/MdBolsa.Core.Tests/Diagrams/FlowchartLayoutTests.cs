@@ -260,6 +260,71 @@ public class FlowchartLayoutTests
         Assert.All(positions, position => Assert.True(double.IsFinite(position.X)));
     }
 
+    [Fact]
+    public void A_flowing_diagram_starts_at_the_origin_and_reports_its_own_height()
+    {
+        // The reason this method exists: a diagram with a vertical scrollbar of its
+        // own traps the wheel, so scrolling the page means moving the mouse off it
+        // first. So height is an output here, not a constraint, and the diagram is
+        // shifted to the top-left so the shell can just use the number.
+        Assert.True(FlowchartParser.TryParse("flowchart TD\n  A[a] --> B[b] --> C[c]", out var chart, out _));
+
+        var positions = FlowchartLayout.ComputeFlowing(chart, 400, out var naturalHeight);
+
+        Assert.Equal(3, positions.Count);
+
+        // Top-left at the origin, within a pixel of rounding.
+        Assert.True(positions.Min(p => p.Y - p.Height / 2) < 1);
+        Assert.True(positions.Min(p => p.X - p.Width / 2) < 1);
+
+        // And the reported height is what the content actually occupies - a wrong
+        // number here is a diagram with a gap under it or one cut off at the bottom.
+        var (_, contentHeight) = FlowchartLayout.Bounds(positions);
+        Assert.Equal(contentHeight, naturalHeight, 1);
+    }
+
+    [Fact]
+    public void A_flowing_diagram_gets_taller_when_it_has_more_ranks()
+    {
+        // If height were silently ignored this would not hold, and the note would
+        // render every diagram at the same height with the rest cut off.
+        Assert.True(FlowchartParser.TryParse("flowchart TD\n  A[a] --> B[b]", out var brief, out _));
+        Assert.True(FlowchartParser.TryParse(
+            "flowchart TD\n  A[a] --> B[b] --> C[c] --> D[d] --> E[e]", out var tall, out _));
+
+        FlowchartLayout.ComputeFlowing(brief, 400, out var briefHeight);
+        FlowchartLayout.ComputeFlowing(tall, 400, out var tallHeight);
+
+        Assert.True(tallHeight > briefHeight * 2, $"{tallHeight} should be much more than {briefHeight}");
+    }
+
+    [Fact]
+    public void A_flowing_diagram_still_respects_the_width()
+    {
+        // Width is the one constraint left, so a wide diagram must still shrink to
+        // the floor and report an overflow - otherwise the horizontal scrollbar
+        // would never appear and part of the diagram would be unreachable.
+        Assert.True(FlowchartParser.TryParse(
+            "flowchart LR\n  A --> B --> C --> D --> E --> F --> G --> H --> I --> J --> K --> L",
+            out var wide, out _));
+
+        var positions = FlowchartLayout.ComputeFlowing(wide, 300, out _);
+        var (contentWidth, _) = FlowchartLayout.Bounds(positions);
+
+        Assert.True(contentWidth > 300, $"expected an overflow, got {contentWidth:F0}");
+        Assert.All(positions, position => Assert.True(
+            position.Width >= 45, $"{position.NodeId} is {position.Width:F0}px, which is not readable"));
+    }
+
+    [Fact]
+    public void A_flowing_empty_diagram_reports_no_height_rather_than_throwing()
+    {
+        var positions = FlowchartLayout.ComputeFlowing(Flowchart.Empty, 400, out var height);
+
+        Assert.Empty(positions);
+        Assert.Equal(0, height);
+    }
+
     // --- Plumbing -----------------------------------------------------------
 
     private static Dictionary<string, DiagramPosition> Layout(
