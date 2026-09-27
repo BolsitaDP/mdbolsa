@@ -315,7 +315,32 @@ Concretely:
   it off rather than waiting for it - which means two loads can be in flight, and
   a generation counter drops the stale one. Without it, switching notes quickly
   appends both responses and you get two of every revision.
-- The shell shows unresolved conflicts inline with the two buttons per note
+### Automatic sync
+
+Sync was a button, which means a second device's edits arrived when you happened
+to think to ask. There are now two triggers, and **neither is on the save path** -
+a note is already on disk before either of them looks at it, and both run off the
+dispatcher, so typing never waits for the network:
+
+- **A ticker** wakes every 30 seconds and asks `SyncTrigger.Decide` whether the
+  5-minute interval has elapsed. The decision is a few comparisons and **no
+  network** - a tick with nothing to do costs nothing and touches nothing.
+- **A debounce** is a one-shot timer rearmed on every write this app makes, so a
+  burst of saves is one sync rather than ten. Rearming a timer is the entire rule;
+  there is nothing to test.
+- **Once at startup**, when a vault opens, so another device's edit is already
+  here when you start working.
+
+A failure **pauses** automatic sync instead of backing off and retrying. A server
+that isn't there yet - the Pi is off, the network is down, a token was rotated -
+will still not be there in four minutes, and a background task failing every thirty
+seconds fills the status line with noise nobody asked for. The manual button stays,
+because a person who has just started the server *wants* the retry, and a manual
+success is what lifts the pause. Eight tests cover the rules; the shell only owns
+the clock.
+
+The re-entrancy rule from the Known Issues applies here too: `_syncRunning` stops a
+tick from starting a second sync on top of the first.- The shell shows unresolved conflicts inline with the two buttons per note
   (again: no dialogs on this runtime).
 ## The shell (Obsidian-shaped)
 
@@ -570,4 +595,7 @@ fine" went unverified for nine phases. It is possible, and worth doing:
 - The shell redesign verified live: launched, the vault reopened by itself, the
   tree, ribbon, status bar and both sidebars render, and the icons were checked
   by capturing the window (see "Seeing the UI from the shell").
-- 210 tests pass (140 Core, 34 Data, 36 Server).
+- Automatic sync verified against the real stack, with the server up and down: it
+  syncs once at startup without anyone asking, an automatic failure pauses it and
+  says so, the pause is not repeated on every tick, a manual success lifts it, and
+  creating a note arms the debounce. 222 tests pass (152 Core, 34 Data, 36 Server).

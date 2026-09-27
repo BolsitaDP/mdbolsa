@@ -53,12 +53,101 @@ public sealed partial class MainPage : Page
     // selection without rebuilding anything. See HighlightOpenNote.
     private readonly Dictionary<string, Button> _noteRows = new(StringComparer.Ordinal);
 
+    // --- Automatic sync (Phase 9 follow-up) --------------------------------
+
+    // Sync used to be a button you pressed, which means a second device's edits
+    // only arrived when you happened to think to ask. Now there are two triggers,
+    // and neither of them is on the save path:
+    //
+    //   * a ticker that decides - locally, with no network - whether the periodic
+    //     sync is due, and runs one if so;
+    //   * a debounce rearmed on every write this app makes, so a burst of saves is
+    //     one sync rather than ten.
+    //
+    // A note is already on disk before either of them looks at it, and both run off
+    // the dispatcher, so typing never waits for the network. What they do wait for
+    // is each other: _syncRunning keeps a tick from starting a second sync on top
+    // of the first, which is the same re-entrancy that crashes this runtime.
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _syncTicker;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _syncDebounce;
+
+    private static readonly TimeSpan SyncInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan SyncDebounce = TimeSpan.FromSeconds(20);
+
+    // How often the ticker *wakes up* to make a decision. Cheap: the decision is a
+    // few comparisons and no network. Frequent enough that a sync happens within
+    // half a minute of the interval elapsing, rare enough to be invisible.
+    private static readonly TimeSpan SyncTick = TimeSpan.FromSeconds(30);
+
+    private SyncTriggerState _syncState = SyncTriggerState.Never;
+    private bool _syncRunning;
+
     public MainPage()
     {
         InitializeComponent();
         AppSession.Host = this; // so GraphPage's "Back to notes" can hand control back
         Loaded += OnLoaded;
+
+        _syncTicker = DispatcherQueue.CreateTimer();
+        _syncTicker.Interval = SyncTick;
+        _syncTicker.Tick += OnSyncTick;
+
+        // One-shot, restarted on every write: that is the whole debounce.
+        _syncDebounce = DispatcherQueue.CreateTimer();
+        _syncDebounce.Interval = SyncDebounce;
+        _syncDebounce.IsRepeating = false;
+        _syncDebounce.Tick += OnSyncDebounce;
+
+        // The ticker runs for the life of the window. It costs a few comparisons
+        // every 30 seconds and, when there is no server configured, decides to do
+        // nothing at all - so it needs no separate on/off.
+        _syncTicker.Start();
     }
+
+    // The write path calls this. Rearming a one-shot timer is the entire debounce:
+    // twenty seconds of quiet, then one sync with everything in it.
+    private void ScheduleSyncAfterWrite()
+    {
+        if (AppSession.ServerUrl is null) return;
+        _syncDebounce.Stop();
+        _syncDebounce.Start();
+    }
+
+    private void OnSyncTick(object? sender, object e)
+    {
+        if (_syncRunning || AppSession.VaultPath is null) return;
+
+        var decision = SyncTrigger.Decide(_syncState, DateTimeOffset.UtcNow, SyncInterval);
+        if (decision == SyncDecision.Paused)
+        {
+            // Said once, in the status line that is already there - not in a
+            // dialog, and not again on every tick.
+            if (_syncState.ConsecutiveFailures == 1)
+            {
+                StatusText.Text = "Automatic sync is paused after a failure. Press Sync to try again.";
+            }
+
+            return;
+        }
+
+        if (decision == SyncDecision.Run) _ = SyncNowAsync(automatic: true);
+    }
+
+    private void OnSyncDebounce(object? sender, object e)
+    {
+        if (_syncRunning || AppSession.VaultPath is null) return;
+        _ = SyncNowAsync(automatic: true);
+    }
+
+    // Called once a vault is open, so an edit from another device is already here
+    // when you start working instead of arriving five minutes later.
+    private void SyncOnceOnStartup()
+    {
+        if (AppSession.ServerUrl is null || AppSession.VaultPath is null) return;
+        _syncDebounce.Stop();
+        _ = SyncNowAsync(automatic: true);
+    }
+
 
     // Reopens the last vault on startup, so the common case is zero clicks. Guarded
     // on VaultPath being null, because Loaded also fires when coming back from the
@@ -144,6 +233,7 @@ public sealed partial class MainPage : Page
 
         ShowTree();
         RescanAndRefreshList();
+        SyncOnceOnStartup();
     }
 
     // A local-first app does not own the folder: someone can drop a file in, or
@@ -170,6 +260,12 @@ public sealed partial class MainPage : Page
         File.WriteAllText(Path.Combine(AppSession.VaultPath, fileName), "# Untitled\n");
         RescanAndRefreshList();
         ShowAndEditNote(fileName);
+
+        // Creating a note is a write like any other. It used to go unsynced until
+        // the next manual sync, because the debounce was only armed from
+        // SaveCurrentNote - which is a no-op when no note was open, which is
+        // exactly the case when you make the first note of a session.
+        ScheduleSyncAfterWrite();
     }
 
     private void OnSaveClicked(object sender, RoutedEventArgs e) => SaveCurrentNote();
@@ -605,7 +701,7 @@ public sealed partial class MainPage : Page
 
     // --- Sync (Phase 9) ----------------------------------------------------
 
-    private void OnSyncRibbonClicked(object sender, RoutedEventArgs e) => _ = SyncNowAsync();
+    private void OnSyncRibbonClicked(object sender, RoutedEventArgs e) => _ = SyncNowAsync(automatic: false);
 
     // Sync settings are edited inline: no dialogs on this runtime.
     private void OnSyncSettingsRibbonClicked(object sender, RoutedEventArgs e)
@@ -635,26 +731,38 @@ public sealed partial class MainPage : Page
         AppSession.ServerUrl = url.Length == 0 ? null : url;
         AppSession.ServerToken = SyncTokenBox.Password.Length == 0 ? null : SyncTokenBox.Password;
 
+        // A manual sync is also the way back from a paused background sync, so
+        // clear the failure count here: the person has just said "try again".
+        _syncState = SyncTriggerState.Never;
+
         ShowTree();
+        SyncOnceOnStartup();
         StatusText.Text = AppSession.ServerUrl is null
             ? "Sync is not configured. The sliders button in the ribbon sets a server."
             : $"Sync configured for {AppSession.ServerUrl} (device {AppSession.DeviceId.ToString()[..8]}).";
     }
 
-    private async Task SyncNowAsync()
+    // `automatic` is not decoration: it decides whether a failure pauses the
+    // background sync, and whether the status line says who asked for it. A sync
+    // nobody pressed should not look like something the user did.
+    private async Task SyncNowAsync(bool automatic)
     {
+        if (_syncRunning) return;
+
         if (AppSession.VaultPath is null)
         {
-            StatusText.Text = "Open a vault first.";
+            if (!automatic) StatusText.Text = "Open a vault first.";
             return;
         }
 
         if (!TryCreateSyncClient(out var client, out var error))
         {
-            StatusText.Text = error;
+            if (!automatic) StatusText.Text = error;
             return;
         }
 
+        _syncRunning = true;
+        _syncState = _syncState with { LastAttempt = DateTimeOffset.UtcNow };
         SyncRibbonButton.IsEnabled = false;
         StatusText.Text = "Syncing...";
 
@@ -669,9 +777,18 @@ public sealed partial class MainPage : Page
 
             if (result.Failed)
             {
-                StatusText.Text = $"Sync failed: {result.Error}";
+                _syncState = SyncTrigger.Failed(_syncState, DateTimeOffset.UtcNow);
+
+                // An automatic failure pauses the background. A manual one says what
+                // went wrong and stays paused until the next manual attempt, which
+                // is the same rule: the difference is only that a person is watching.
+                StatusText.Text = automatic
+                    ? $"Background sync failed, so it is now paused: {result.Error}"
+                    : $"Sync failed: {result.Error}";
                 return;
             }
+
+            _syncState = SyncTrigger.Succeeded(_syncState, DateTimeOffset.UtcNow);
 
             // The pull may have written or deleted .md files, so the indexes and
             // every panel derived from them are stale until we scan again.
@@ -686,6 +803,7 @@ public sealed partial class MainPage : Page
         }
         finally
         {
+            _syncRunning = false;
             SyncRibbonButton.IsEnabled = true;
         }
     }
@@ -909,6 +1027,8 @@ public sealed partial class MainPage : Page
             ? "That was already the current revision."
             : $"Restored revision {revision}. It is now the note's current content and the next " +
               "sync will push it as a new revision - nothing was removed from the history.";
+
+        ScheduleSyncAfterWrite();
     }
 
     // --- Conflicts (Phase 10) ----------------------------------------------
@@ -1008,6 +1128,8 @@ public sealed partial class MainPage : Page
         StatusText.Text = keepLocal
             ? "Kept this device's version and pushed it. The server's version is in the note's history."
             : "Took the server's version. Your copy is in the note's history if you need it.";
+
+        ScheduleSyncAfterWrite();
     }
 
     private string? ReadCurrentNoteContent()
@@ -1307,6 +1429,7 @@ public sealed partial class MainPage : Page
         RescanAndRefreshList();
         ShowAndEditNote(newName);
         StatusText.Text = $"Renamed {currentName} to {newName}.";
+        ScheduleSyncAfterWrite();
     }
 
     // --- Opening and saving a note -----------------------------------------
@@ -1483,6 +1606,8 @@ public sealed partial class MainPage : Page
 
             EditorStatusText.Text = $"Editing {_currentRelativePath} (saved {DateTime.Now:T})";
             StatusText.Text = "Saved.";
+
+            ScheduleSyncAfterWrite();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {

@@ -10,6 +10,12 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
+**Sync happens on its own now.** Opening a vault syncs once, edits made on another
+device arrive every five minutes, and a burst of saves is pushed once after twenty
+seconds of quiet - none of it on the save path, so typing never waits for the
+network. If the server can't be reached, the background sync *pauses* and says so
+rather than retrying every thirty seconds; pressing Sync is the way back.
+
 **Note history is finally visible.** The server has been keeping every revision
 since Phase 10 and the client could ask for them - but the UI never did, so you
 could resolve a conflict and never go back. The right sidebar now lists the open
