@@ -463,6 +463,73 @@ collapsed to a point. They now assert a **fraction of the viewport** used, and t
 the two closest nodes are further apart than a node is wide - distinct coordinates
 are not the same as a legible graph. Worth remembering: a test that cannot fail for
 the bug you are worried about is worse than no test, because it is a claim.
+### Attachments (Phase 11)
+
+**An attachment is identified by the hash of its contents.** The file is named after
+it, in the `Attachments/` folder the vision already specifies. That one decision does
+all the work: deduplication is free, "what have I not got" is a cursor over `seen_at`
+and nothing else, renaming is a non-event, and — the part worth saying out loud —
+**attachments cannot conflict**, because a hash has exactly one possible content.
+There is no conflict model here and none is needed.
+
+The bytes live in their own table, not in a `bytea` column on the metadata row:
+"what have I not got" selects five columns and runs every few minutes, and making
+that drag 32 MB blobs through memory on every device would be a slow way to learn a
+file name.
+
+What the server checks, and why:
+
+- **The hash in the URL is verified against the body.** Believing the client would
+  store corruption and hand it to every device that asked, and nobody would find out
+  until an image failed to open weeks later. Mismatch is 422 and nothing is stored.
+- **A size cap, enforced before the body is read and again while reading it**, because
+  a shared token plus anonymous uploads plus no limit is how a Pi's SD card fills up
+  at 3am.
+
+The preview draws an image on a line of its own as a real `Image` control, decoded
+asynchronously from a random-access stream (a decoded 4000x3000 PNG is ~48 MB; a byte
+array would hold the file *and* the decode). Resolution is deliberately narrow — a
+bare name is looked for in the attachments folder, a path is resolved inside the
+vault, a URL is refused, and anything containing `..` is refused rather than
+normalised. A missing image says so, because a silent gap is the failure people
+describe as "it just does not show sometimes".
+
+Three sync bugs found while building it, all of them the kind that only show up
+against a real server with real state in it:
+
+- **Every attachment was re-uploaded on every sync.** The push side had no way to ask
+  "does the server already have this?", so it assumed not, and the client
+  re-transferred the whole vault every five minutes. Fixed the way notes already do
+  it: a per-attachment pushed mark, so a second sync pushes nothing. That is the
+  difference between "syncs" and "uploads your vault, repeatedly".
+- **The attachment watermark was the note cursor.** Two different streams with two
+  different watermarks, sharing one means whichever ran ahead starves the other: a
+  note synced at T+1h hides every attachment the server saw before T. Attachments
+  have their own watermark now.
+- **The paged pull repeated itself forever.** The comparison is a pair,
+  `(seen_at, hash) > (cursorAt, cursorHash)`, and the server was being handed the
+  *query's* watermark as `cursorAt` instead of the last row's - which is true for
+  nearly every row, so page two was page one again. The second half of the cursor now
+  travels as its own parameter rather than being parsed back out of a composite
+  string, because a key that has to be split correctly will eventually be split
+  wrongly.
+
+And a fourth, smaller one: a download arrived with **no extension**, because a
+content-addressed file has no name to carry one and I passed an empty string to keep
+it. It is fixed from the server's declared content type, because a file called
+`3f7868...` is present and useless - nothing will open it.
+
+Two more things found while building it:
+
+- **`![[diagram.png]]` was being read as a wiki link**, so every note with a picture
+  in it reported an unresolved link — a status line that cries wolf on ordinary notes
+  is a status line nobody reads. The embed marker is now skipped by
+  `WikiLinkParser`.
+- **.NET numbers unnamed regex groups before named ones.** In
+  `(?<Bang>!?)\[\[([^\]|#]+)\]\]` the target is group 1 and `Bang` is group 2 — the
+  opposite of the order they are written in. Reading the target positionally returned
+  an empty list while looking perfectly correct. Both groups are named now, and the
+  trap is written down next to the pattern.
 ## Seeing the UI from the shell
 
 Screenshotting this app used to be impossible from here, which is why "it looks

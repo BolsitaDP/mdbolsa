@@ -1,5 +1,6 @@
 using MdBolsa.Data.Links;
 using MdBolsa.Data.Search;
+using MdBolsa.Data.Attachments;
 using MdBolsa.Data.Sync;
 using MdBolsa.Data.Tags;
 using MdBolsa.Data.Vault;
@@ -65,6 +66,8 @@ internal static class AppSession
     public static SqliteTagIndex OpenTagIndex() => new(DatabasePath);
 
     public static SqliteSyncStateStore OpenSyncStateStore() => new(DatabasePath);
+
+    public static SqliteAttachmentIndex OpenAttachmentIndex() => new(DatabasePath);
 
     // --- Sync identity and connection ------------------------------------
     //

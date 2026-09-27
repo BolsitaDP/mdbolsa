@@ -1,5 +1,6 @@
 using MdBolsa.Contracts;
 using MdBolsa.Server.Endpoints;
+using MdBolsa.Server.Attachments;
 using MdBolsa.Server.Notes;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -51,17 +52,18 @@ if (isProduction && string.IsNullOrWhiteSpace(token))
 }
 
 builder.Services.AddSingleton(new NoteStore(connectionString));
+builder.Services.AddSingleton(new AttachmentStore(connectionString));
 builder.Services.AddSingleton(new ServerInfo(
     environment,
     DescribeHost(connectionString),
-    NoteSchema.Version,
+    AttachmentSchema.Version,
     isProduction ? "shared token" : string.IsNullOrWhiteSpace(token) ? "none" : "shared token (development default)"));
 
 var app = builder.Build();
 
 var info = app.Services.GetRequiredService<ServerInfo>();
 app.Logger.LogWarning(
-    "mdbolsa server starting: environment={Environment} database={Host} schema={Schema} auth={Auth}",
+    "mdbolsa server starting: environment={Environment} database={Host} schema={SchemaVersion} auth={Auth}",
     info.Environment, info.Host, info.SchemaVersion, info.Authentication);
 
 app.MapGet("/health", (ServerInfo info) => Results.Ok(new
@@ -78,13 +80,14 @@ app.MapGet("/health", (ServerInfo info) => Results.Ok(new
 
 app.MapNoteEndpoints(token);
 app.MapConflictEndpoints(token);
+app.MapAttachmentEndpoints(token);
 
 // The schema is created on boot, not by a migration step (see NoteSchema).
 // Failure here is fatal on purpose: a sync server that starts without its
 // tables would fail every request later, far from the cause.
 try
 {
-    await NoteSchema.InitialiseAsync(connectionString);
+    await AttachmentSchema.InitialiseAsync(connectionString);
 }
 catch (Exception ex)
 {

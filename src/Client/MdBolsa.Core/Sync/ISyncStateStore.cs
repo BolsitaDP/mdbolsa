@@ -22,6 +22,36 @@ public interface ISyncStateStore
     // recovers from a server whose history it can't line up with).
     void ResetCursor();
 
+    // The attachment pull's own position, kept separately because a sync that moved
+    // it and then failed would silently skip whatever was in between.
+    string? GetAttachmentCursor();
+
+    void SetAttachmentCursor(string? cursor);
+
+    // The other half of the page cursor. The comparison the server does is a pair,
+    // and passing only the hash makes it repeat the page it just sent.
+    DateTimeOffset? GetAttachmentPageSeenAt();
+
+    void SetAttachmentPageSeenAt(DateTimeOffset? seenAt);
+
+    // The attachment *watermark* - the server's `seen_at` as of the last successful
+    // pull. Deliberately not the note cursor: notes and attachments are two different
+    // streams with two different watermarks, and sharing one means a note synced
+    // ahead of an attachment silently drops that attachment forever.
+    DateTimeOffset? GetAttachmentSince();
+
+    void SetAttachmentSince(DateTimeOffset? since);
+
+    // Whether the server is already known to have this attachment. Without it every
+    // sync re-uploads every file in the vault, which is not slow on a home network
+    // but is the difference between "syncs" and "transfers your whole vault, again".
+    bool IsAttachmentPushed(string hash);
+
+    void MarkAttachmentPushed(string hash);
+
+    /// <summary>Forgets pushed marks, so the next push sends everything again.</summary>
+    void ClearAttachmentPushed();
+
     // The content hash the server last confirmed for a note. Compared against the
     // note's current hash, it answers the only question that matters before
     // pushing or overwriting: "did I change this since the server last saw it?"

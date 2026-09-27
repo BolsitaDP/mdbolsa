@@ -88,6 +88,26 @@ GET /api/notes/{id}/versions        newest first
 GET /api/notes/{id}/versions/{rev}   one revision's content
 ```
 
+## Attachments
+
+Files in `Attachments/` are identified by the SHA-256 of their contents, and the file
+is named after it. Identical bytes are therefore the same attachment on every
+device, and **an attachment cannot conflict** - there is one possible content for a
+given hash, so there is nothing for two devices to disagree about.
+
+```
+PUT /api/attachments/{hash}            upload (the hash is verified, not trusted)
+GET /api/attachments/{hash}            download
+GET /api/attachments/changes?since=    the incremental pull
+GET /api/attachments                   what is stored, names and sizes
+```
+
+The hash in the URL is checked against the body: a mismatch is 422 and nothing is
+stored, because a server that believed the client would spread corruption to every
+device that asked. Uploads are capped at 32 MB. A rejected upload may surface as a
+413 or as a connection closed mid-send, depending on the server - either way nothing
+is stored, which is the property that matters.
+
 ## Still open
 
 - **Triggers**: sync is manual today. Debounce after edits, periodic, on

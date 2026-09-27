@@ -255,6 +255,24 @@ public class ConflictResolverTests : IDisposable
 
         public void ResetCursor() { }
 
+        public string? GetAttachmentCursor() => null;
+
+        public void SetAttachmentCursor(string? cursor) { }
+
+        public DateTimeOffset? GetAttachmentPageSeenAt() => null;
+
+        public void SetAttachmentPageSeenAt(DateTimeOffset? seenAt) { }
+
+        public DateTimeOffset? GetAttachmentSince() => null;
+
+        public void SetAttachmentSince(DateTimeOffset? since) { }
+
+        public bool IsAttachmentPushed(string hash) => false;
+
+        public void MarkAttachmentPushed(string hash) { }
+
+        public void ClearAttachmentPushed() { }
+
         public string? GetPushedHash(Guid noteId) => _hashes.GetValueOrDefault(noteId);
 
         public void SetPushedHash(Guid noteId, string hash) => _hashes[noteId] = hash;

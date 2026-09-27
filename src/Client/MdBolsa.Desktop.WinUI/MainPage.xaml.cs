@@ -1,6 +1,12 @@
 using MdBolsa.Contracts;
+using MdBolsa.Core.Attachments;
 using MdBolsa.Core.Links;
 using MdBolsa.Core.Markdown;
+using Windows.Storage;
+using Windows.Storage.Streams;
+using MdBolsa.Core.Markdown;
+using Windows.Storage;
+using Windows.Storage.Streams;
 using MdBolsa.Core.Search;
 using MdBolsa.Core.Tags;
 using MdBolsa.Core.Sync;
@@ -935,16 +941,34 @@ public sealed partial class MainPage : Page
 
             _syncState = SyncTrigger.Succeeded(_syncState, DateTimeOffset.UtcNow);
 
+            // Attachments go in the same pass and after the notes, so a note that
+            // arrives is not a broken image reference for the few seconds its picture
+            // takes to follow. They cannot conflict, so there is nothing to order
+            // *between* them - only this, which is about what the reader sees.
+            var attachments = await SyncAttachmentsAsync();
+
             // The pull may have written or deleted .md files, so the indexes and
             // every panel derived from them are stale until we scan again.
             RescanAndRefreshList();
 
+            // Built in parts, because both things that can go wrong here - a conflict
+            // and a failed attachment - are worth saying, and a branch that reports
+            // one of them silently drops the other. That is how "attachments are not
+            // syncing" hides behind an unrelated conflict message.
             var conflicts = AppSession.OpenSyncStateStore().GetConflicts();
-            StatusText.Text = conflicts.Count == 0
-                ? $"Synced: {result.Pulled} pulled, {result.Pushed} pushed, {result.Deleted} deleted."
-                : $"Synced: {result.Pulled} pulled, {result.Pushed} pushed, {result.Deleted} deleted. " +
-                  $"{conflicts.Count} note(s) changed in two places - nothing was overwritten. " +
-                  "The warning button in the ribbon lists them.";
+
+            var message =
+                $"Synced: {result.Pulled} pulled, {result.Pushed} pushed, {result.Deleted} deleted. " +
+                $"Attachments: {attachments.Pulled} pulled, {attachments.Pushed} pushed" +
+                (attachments.Failed ? $" - failed: {attachments.Error}" : ".");
+
+            if (conflicts.Count > 0)
+            {
+                message += $" {conflicts.Count} note(s) changed in two places - nothing was " +
+                           "overwritten. The warning button in the ribbon lists them.";
+            }
+
+            StatusText.Text = message;
         }
         finally
         {
@@ -954,6 +978,30 @@ public sealed partial class MainPage : Page
     }
 
 
+
+    // A separate client from the note one, and its own HttpClient: attachments and
+    // notes have different endpoints, different failure modes (a 32 MB body versus a
+    // 4 KB one) and different retry behaviour, and sharing one would mean a failed
+    // image upload reported the note sync as failed too.
+    private async Task<AttachmentSyncResult> SyncAttachmentsAsync()
+    {
+        var url = AppSession.ServerUrl;
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var baseAddress))
+        {
+            return AttachmentSyncResult.FailedResult("No sync server configured.");
+        }
+
+        if (!url.EndsWith('/')) baseAddress = new Uri(url + "/");
+
+        using var http = new HttpClient { BaseAddress = baseAddress, Timeout = TimeSpan.FromMinutes(5) };
+        return await new AttachmentSyncClient(
+            http,
+            AppSession.DeviceId,
+            AppSession.ServerToken ?? string.Empty,
+            AppSession.OpenSyncStateStore(),
+            AppSession.OpenAttachmentIndex())
+            .SyncAsync(AppSession.VaultPath!);
+    }
 
     private bool TryCreateSyncClient(out NoteSyncClient client, out string error)
     {
@@ -1100,19 +1148,105 @@ public sealed partial class MainPage : Page
             Fill = (Brush)Application.Current.Resources["DividerBrush"],
         },
 
-        // The image is named but not fetched: a preview that reached the network (or
-        // the filesystem, to resolve a relative path) would be a preview with side
-        // effects. What the note says about the image is shown instead.
-        Block.Image image => new TextBlock
-        {
-            Text = $"image: {image.Source}",
-            Opacity = 0.6,
-            FontSize = 12,
-            TextWrapping = TextWrapping.Wrap,
-        },
+        Block.Image image => BuildImage(image),
 
         _ => null,
     };
+
+    // Draws the image, or says why it cannot.
+    //
+    // Resolution is deliberately narrow: a bare name is looked for in the
+    // attachments folder, and a path is resolved inside the vault and nowhere else.
+    // A preview that would follow a path out of the vault, or fetch a URL, is a
+    // preview with side effects - and a missing image says so rather than leaving a
+    // gap, because a silent gap is the failure mode people describe as "it just does
+    // not show sometimes".
+    private static FrameworkElement BuildImage(Block.Image image)
+    {
+        var source = image.Source;
+        var path = ResolveVaultPath(source);
+
+        if (path is null)
+        {
+            return MissingAttachment($"No attachment called {source} in the vault.");
+        }
+
+        // SVG is a document, not a bitmap, and the image control cannot draw one.
+        if (source.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+        {
+            return MissingAttachment($"{source} is an SVG. The preview shows a link, not the drawing.");
+        }
+
+        try
+        {
+            // Asynchronously, from a random-access stream: a decoded 4000x3000 PNG is
+            // ~48 MB in memory, and SetSource on a byte array would hold the whole
+            // file *and* the decode. A broken file throws on decode rather than
+            // rendering nothing, so the continuation is where the failure is reported.
+            var control = new Image
+            {
+                MaxHeight = 420,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+
+            _ = LoadImageAsync(control, path);
+            return control;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
+        {
+            return MissingAttachment($"{source} could not be opened: {ex.Message}");
+        }
+    }
+
+    private static async Task LoadImageAsync(Image control, string path)
+    {
+        try
+        {
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            using var stream = await file.OpenAsync(FileAccessMode.Read);
+
+            var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+            await bitmap.SetSourceAsync(stream);
+            control.Source = bitmap;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            // Reported in place of the picture. A decode failure that is swallowed is
+            // indistinguishable from a broken reference, and the first one is a bug.
+            control.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private static FrameworkElement MissingAttachment(string message) => new StackPanel
+    {
+        Spacing = 2,
+        Children =
+        {
+            new TextBlock { Text = "missing attachment", FontSize = 11, Opacity = 0.6 },
+            new TextBlock { Text = message, FontSize = 12, Opacity = 0.8, TextWrapping = TextWrapping.Wrap },
+        },
+    };
+
+    // Inside the vault, and nowhere else. A name with no separator is an attachment;
+    // a path is taken relative to the vault root. Anything that climbs out with ".."
+    // is refused rather than normalised - a note that references ../../secrets is a
+    // bug, and quietly serving it would be worse than saying no.
+    private static string? ResolveVaultPath(string source)
+    {
+        if (AppSession.VaultPath is null) return null;
+        if (source.Contains("://", StringComparison.Ordinal)) return null;
+        if (source.Split('/').Any(segment => segment == "..")) return null;
+
+        var candidate = source.Contains('/')
+            ? Path.Combine(AppSession.VaultPath, source.Replace('/', Path.DirectorySeparatorChar))
+            : Path.Combine(
+                AppSession.VaultPath,
+                MdBolsa.Core.Attachments.AttachmentRules.FolderPath,
+                source);
+
+        return File.Exists(candidate) ? candidate : null;
+    }
 
     private static Border BuildQuote(Block.Quote quote)
     {
@@ -1174,6 +1308,10 @@ public sealed partial class MainPage : Page
             Inline.WikiLink wiki => wiki.Alias is null ? wiki.Target : wiki.Alias,
             Inline.Link link => Rendered(link.Label),
             Inline.Emphasis emphasis => Rendered(emphasis.Children),
+            // An inline image inside a sentence is a marker, not a picture: the
+            // paragraph is a wrapping TextBlock, and a real image element cannot live
+            // inside one. The image on its own line is the case that gets drawn.
+            Inline.Image image => $"[image: {image.Alt}]",
             _ => string.Empty,
         }));
     // --- Note history (Phase 10, client side) ------------------------------
@@ -1551,6 +1689,12 @@ public sealed partial class MainPage : Page
 
         var tagResult = new TagScanner(AppSession.VaultPath!, vaultIndex, AppSession.OpenTagIndex()).Scan();
 
+        // Attachments are scanned here, with everything else, because a sync can only
+        // push what the index knows about. Left out, the folder was never looked at
+        // and nothing was ever uploaded.
+        var attachmentResult = new AttachmentScanner(
+            AppSession.VaultPath!, AppSession.OpenAttachmentIndex()).Scan();
+
         var notes = vaultIndex.GetAll().OrderBy(n => n.RelativePath).ToList();
         _notesById = notes.ToDictionary(n => n.Id);
 
@@ -1567,7 +1711,8 @@ public sealed partial class MainPage : Page
         RefreshView(
             $"Scanned {_notesById.Count} note(s) · {vaultResult.Added} new, " +
             $"{vaultResult.Updated} changed{attention} · " +
-            $"{tagResult.DistinctTags} tag(s).");
+            $"{tagResult.DistinctTags} tag(s) · " +
+            $"{attachmentResult.Added} attachment(s) added.");
     }
 
     // Repaints whichever sidebar view is active, and the status line. One place,

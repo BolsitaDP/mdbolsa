@@ -45,6 +45,10 @@ public abstract record Inline
     /// <summary>Code, ticks or double ticks. Never spans a blank line.</summary>
     public sealed record Code(string Value) : Inline;
 
+    /// <summary>An image, either "![alt](path)" or the embed form "![[name]]". The
+    /// alt doubles as the name for the embed form, which is all it carries.</summary>
+    public sealed record Image(string Alt, string Source) : Inline;
+
     /// <summary>Emphasis and strong. The distinction is kept because a preview
     /// renders them differently, and because dropping it now means every consumer
     /// has to guess.</summary>

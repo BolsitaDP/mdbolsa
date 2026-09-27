@@ -273,11 +273,31 @@ public class NoteSyncClientTests : IDisposable
 
         public NoteCursor? Cursor { get; private set; }
 
+        public string? AttachmentCursor { get; private set; }
+
         public NoteCursor? GetCursor() => Cursor;
 
         public void SetCursor(NoteCursor cursor) => Cursor = cursor;
 
         public void ResetCursor() => Cursor = null;
+
+        public string? GetAttachmentCursor() => AttachmentCursor;
+
+        public void SetAttachmentCursor(string? cursor) => AttachmentCursor = cursor;
+
+        public DateTimeOffset? GetAttachmentPageSeenAt() => null;
+
+        public void SetAttachmentPageSeenAt(DateTimeOffset? seenAt) { }
+
+        public DateTimeOffset? GetAttachmentSince() => null;
+
+        public void SetAttachmentSince(DateTimeOffset? since) { }
+
+        public bool IsAttachmentPushed(string hash) => false;
+
+        public void MarkAttachmentPushed(string hash) { }
+
+        public void ClearAttachmentPushed() { }
 
         public string? GetPushedHash(Guid noteId) => _hashes.GetValueOrDefault(noteId);
 

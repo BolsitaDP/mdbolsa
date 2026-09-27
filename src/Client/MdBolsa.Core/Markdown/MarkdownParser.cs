@@ -182,6 +182,32 @@ public static class MarkdownParser
                 }
             }
 
+            // "![[diagram.png]]" - the embed form Obsidian made familiar, and the one
+            // that reads as "put this in the note" rather than "link to this".
+            if (text[i] == '!' && i + 1 < text.Length && text[i + 1] == '[' && i + 2 < text.Length && text[i + 2] == '[')
+            {
+                var embed = ReadWikiLink(text, i + 1);
+                if (embed is not null)
+                {
+                    FlushPlain();
+                    inlines.Add(new Inline.Image(embed.Value.Alias ?? embed.Value.Target, embed.Value.Target));
+                    i = embed.Value.NextIndex;
+                    continue;
+                }
+            }
+
+            if (text[i] == '!' && i + 1 < text.Length && text[i + 1] == '[')
+            {
+                var inline = ReadImage(text, i);
+                if (inline is not null)
+                {
+                    FlushPlain();
+                    inlines.Add(new Inline.Image(inline.Value.Alt, inline.Value.Source));
+                    i = inline.Value.NextIndex - 1;
+                    continue;
+                }
+            }
+
             if (text[i] == '[')
             {
                 var link = ReadLink(text, i);
@@ -256,6 +282,17 @@ public static class MarkdownParser
 
         var alias = pipe < 0 ? null : body[(pipe + 1)..].Trim();
         return new WikiSpan(target, alias is { Length: > 0 } ? alias : null, close + 2);
+    }
+
+    private readonly record struct ImageSpan(string Alt, string Source, int NextIndex);
+
+    // "![alt](path)", checked before ReadLink so the "!" is not left in the label.
+    private static ImageSpan? ReadImage(string text, int start)
+    {
+        var link = ReadLink(text, start + 1);
+        return link is null
+            ? null
+            : new ImageSpan(link.Value.Label, link.Value.Target, link.Value.NextIndex);
     }
 
     private static LinkSpan? ReadLink(string text, int start)
@@ -437,11 +474,25 @@ public static class MarkdownParser
         return null;
     }
 
+    // An image on a line of its own is a *block*, because that is how people write
+    // them and because it is the only shape a preview can draw properly: a real
+    // image element, at its own size, in its own place. The same markup in the
+    // middle of a sentence stays an Inline.Image and renders as a marker, which is
+    // honest about the difference rather than quietly reflowing the paragraph.
     private static bool IsImageOnly(string line, out Block.Image image)
     {
         image = null!;
 
         var trimmed = line.Trim();
+
+        if (trimmed.StartsWith("![[", StringComparison.Ordinal) && trimmed.EndsWith("]]", StringComparison.Ordinal))
+        {
+            var body = trimmed[3..^2].Trim();
+            var parts = body.Split('|', 2);
+            image = new Block.Image(parts[0].Trim(), parts[0].Trim());
+            return parts[0].Trim().Length > 0;
+        }
+
         if (!trimmed.StartsWith("![", StringComparison.Ordinal)) return false;
         if (!trimmed.EndsWith(')')) return false;
 

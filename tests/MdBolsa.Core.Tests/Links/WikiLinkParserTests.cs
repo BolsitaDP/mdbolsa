@@ -47,4 +47,22 @@ public class WikiLinkParserTests
     {
         Assert.Empty(WikiLinkParser.ExtractTargets("[[]]"));
     }
+
+    [Fact]
+    public void AnEmbeddedImageIsNotALink()
+    {
+        // "![[diagram.png]]" is a reference to an attachment, not to a note. Reading
+        // it as a link made every note with a picture in it report an unresolved link,
+        // which is how a status line stops being read.
+        Assert.Empty(WikiLinkParser.ExtractTargets("![[diagram.png]]"));
+        Assert.Empty(WikiLinkParser.ExtractTargets("![[diagram.png|The diagram]]"));
+    }
+
+    [Fact]
+    public void AnEmbedAndALinkInTheSameLineBothBehave()
+    {
+        var targets = WikiLinkParser.ExtractTargets("![[a.png]] and [[Docker]]");
+
+        Assert.Equal(["Docker"], targets);
+    }
 }

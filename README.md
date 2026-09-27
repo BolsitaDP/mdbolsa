@@ -10,6 +10,14 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
+**Attachments, and they sync.** Files in `Attachments/` are identified by the hash of
+their contents and named after it, so the same screenshot in three notes is one file
+on every device, and **an attachment cannot conflict** — a hash has exactly one
+possible content. The server verifies the hash it is sent rather than trusting the
+client, and caps the size. `![[diagram.png]]` and `![](Attachments/x.png)` both
+render as pictures in the preview, and one that is missing says so. See
+[0011](docs/decisions/0011-attachments.md).
+
 **A live preview, beside the source.** `Ctrl+R` opens a read-only pane that renders
 the open note as Markdown - headings, lists, quotes, code, links, bold and italic -
 while the plain-text editor stays exactly where it was. The preview is a projection

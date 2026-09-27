@@ -59,6 +59,117 @@ public sealed class SqliteSyncStateStore : ISyncStateStore
         command.ExecuteNonQuery();
     }
 
+    // The attachment pull's position, in the same database as everything else: a
+    // half-finished sync that recorded its note cursor but lost its attachment one
+    // would skip every attachment in between, forever.
+    public string? GetAttachmentCursor()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM sync_key_value WHERE key = 'attachment_cursor'";
+
+        return command.ExecuteScalar() as string;
+    }
+
+    public DateTimeOffset? GetAttachmentSince()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM sync_key_value WHERE key = 'attachment_since'";
+
+        var stored = command.ExecuteScalar() as string;
+        return stored is not null && DateTimeOffset.TryParse(stored, out var since) ? since : null;
+    }
+
+    public void SetAttachmentSince(DateTimeOffset? since) => WriteKey("attachment_since", since?.ToString("O"));
+
+    public bool IsAttachmentPushed(string hash)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sync_attachment_state WHERE hash = $hash";
+        command.Parameters.AddWithValue("$hash", hash);
+
+        return command.ExecuteScalar() is not null;
+    }
+
+    public void MarkAttachmentPushed(string hash)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO sync_attachment_state (hash) VALUES ($hash)
+            ON CONFLICT (hash) DO NOTHING;
+            """;
+        command.Parameters.AddWithValue("$hash", hash);
+        command.ExecuteNonQuery();
+    }
+
+    public void ClearAttachmentPushed()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM sync_attachment_state;";
+        command.ExecuteNonQuery();
+    }
+
+    public DateTimeOffset? GetAttachmentPageSeenAt()
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM sync_key_value WHERE key = 'attachment_page_seen_at'";
+
+        var stored = command.ExecuteScalar() as string;
+        return stored is not null && DateTimeOffset.TryParse(stored, out var seenAt) ? seenAt : null;
+    }
+
+    public void SetAttachmentPageSeenAt(DateTimeOffset? seenAt) =>
+        WriteKey("attachment_page_seen_at", seenAt?.ToString("O"));
+
+    private void WriteKey(string key, string? value)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+
+        if (value is null)
+        {
+            command.CommandText = "DELETE FROM sync_key_value WHERE key = $key";
+        }
+        else
+        {
+            command.CommandText = """
+                INSERT INTO sync_key_value (key, value) VALUES ($key, $value)
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+                """;
+            command.Parameters.AddWithValue("$value", value);
+        }
+
+        command.Parameters.AddWithValue("$key", key);
+        command.ExecuteNonQuery();
+    }
+
+    public void SetAttachmentCursor(string? cursor)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+
+        if (cursor is null)
+        {
+            command.CommandText = "DELETE FROM sync_key_value WHERE key = 'attachment_cursor'";
+        }
+        else
+        {
+            command.CommandText = """
+                INSERT INTO sync_key_value (key, value)
+                VALUES ('attachment_cursor', $value)
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+                """;
+            command.Parameters.AddWithValue("$value", cursor);
+        }
+
+        command.ExecuteNonQuery();
+    }
+
     public string? GetPushedHash(Guid noteId)
     {
         using var connection = OpenConnection();
@@ -156,7 +267,16 @@ public sealed class SqliteSyncStateStore : ISyncStateStore
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            CREATE TABLE IF NOT EXISTS sync_cursor (
+                CREATE TABLE IF NOT EXISTS sync_key_value (
+                    key   text PRIMARY KEY,
+                    value text NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS sync_attachment_state (
+                    hash text PRIMARY KEY
+                );
+
+                CREATE TABLE IF NOT EXISTS sync_cursor (
                 id         INTEGER PRIMARY KEY CHECK (id = 1),
                 updated_at TEXT NOT NULL,
                 note_id    TEXT NOT NULL
