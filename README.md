@@ -10,6 +10,13 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
+**The graph takes the mouse.** Wheel zooms towards the pointer, dragging the
+background pans, and a node can be **picked up and moved** - it lifts, follows the
+pointer, settles when you let go, and stays where you put it across a refresh.
+Hovering a node lights it and its neighbours and fades the rest, which is what makes
+the edges readable instead of noise. Click selects, double-click opens the note, and
+**Reset view** puts every dragged node back.
+
 **Attachments, and they sync.** Files in `Attachments/` are identified by the hash of
 their contents and named after it, so the same screenshot in three notes is one file
 on every device, and **an attachment cannot conflict** — a hash has exactly one

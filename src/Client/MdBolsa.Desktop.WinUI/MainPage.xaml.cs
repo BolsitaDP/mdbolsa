@@ -1667,6 +1667,15 @@ public sealed partial class MainPage : Page
         GraphHost.Navigate(typeof(GraphPage));
     }
 
+    // Called by the graph view when a note is double-clicked there. The graph lives
+    // in a Frame in this column and is only ever hidden, never unloaded, so opening a
+    // note from it is a hide plus a normal open - the same path the tree takes.
+    public void OpenNoteFromGraph(string relativePath)
+    {
+        HideGraph();
+        ShowAndEditNote(relativePath);
+    }
+
     // Called by GraphPage's "Back to notes" button.
     public void HideGraph()
     {

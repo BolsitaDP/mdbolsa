@@ -8,7 +8,13 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24" RowSpacing="8">
+    <Grid Padding="24" RowSpacing="8" KeyDown="OnModifierKeyDown" KeyUp="OnModifierKeyUp" LostFocus="OnLostFocus"
+          PointerWheelChanged="OnGraphPointerWheelChanged"
+          PointerPressed="OnGraphPointerPressed"
+          PointerMoved="OnGraphPointerMoved"
+          PointerReleased="OnGraphPointerReleased"
+          PointerCanceled="OnGraphPointerReleased"
+          PointerCaptureLost="OnGraphPointerReleased">
         <!--
             The star row is the CANVAS, not the status line. It was the other way
             round, which is why the graph showed nothing at all: a Canvas reports no
@@ -29,7 +35,8 @@
             <Button x:Name="RefreshButton" Content="Refresh" Click="OnRefreshClicked" />
             <Button Content="Zoom in" Click="OnZoomInClicked" />
             <Button Content="Zoom out" Click="OnZoomOutClicked" />
-            <Button x:Name="ResetViewButton" Content="Reset view" Click="OnResetViewClicked" />
+            <Button x:Name="ResetViewButton" Content="Reset view" Click="OnResetViewClicked"
+                        ToolTipService.ToolTip="Fit the graph to the window and put every dragged node back" />
         </StackPanel>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
@@ -64,7 +71,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="SelectionText" VerticalAlignment="Center" Opacity="0.7"
                            TextWrapping="Wrap"
-                           Text="Select a node to see what it is. Drag to pan, use the zoom buttons to zoom." />
+                           Text="Click a node to see it, double-click to open the note. Drag the background or use the middle/right button to pan, the wheel to zoom, shift+wheel or alt+wheel to scroll. Drag a node to move it - Reset view puts everything back." />
                 <Button x:Name="CenterOnSelectionButton" Grid.Column="1" Content="Make center"
                         Click="OnCenterOnSelectionClicked" IsEnabled="False" />
             </Grid>

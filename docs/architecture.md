@@ -429,6 +429,47 @@ Two rules that came out of writing it:
 The preview refreshes on a 400ms debounce off the dispatcher, never while typing:
 reading the text on every keystroke and rebuilding the visual tree from a
 text-changed handler is the documented crash.
+### The graph view, as an instrument
+
+A force graph is only useful if you can move around in it, and the first version
+had a mouse that did nothing: the wheel was ignored (only touch reached the
+manipulation events), and a node could not be picked up at all. What it has now,
+following Obsidian because it is the behaviour people already have in their hands:
+
+- **Wheel zooms, anchored on the pointer**, so whatever is under the cursor stays
+  under the cursor. Shift+wheel and Alt+wheel pan instead, and the pan is the only
+  way to move a graph vertically on a machine with no scroll lock.
+- **Drag a node to move it.** The node lifts, follows the pointer, and settles back
+  when released; its edges follow it, because an edge that keeps pointing at where
+  the node *was* is the single ugliest thing a force graph can do. A dropped node is
+  **pinned**: the layout re-applies pins after every pass, so a hand-made
+  arrangement survives a refresh. "Reset view" unpins everything, and says so on the
+  button.
+- **Pan by dragging the background**, or with the middle or right button.
+- **Hovering a node lights it and its neighbours and fades the rest** - which is the
+  reason to draw edges at all. Without a way to see which edges belong to a node,
+  the lines are noise.
+- **Click selects, double-click opens the note.** Obsidian opens on a single click;
+  here a click selects, because the bar under the graph is a real panel (path, tags,
+  "make this the centre") and losing it on every tap would be the worse trade.
+
+Two decisions worth defending:
+
+- **The wheel and the pointer handlers are on the page, not on the canvas.** Pointer
+  events bubble, so a page-level handler sees the wheel wherever it lands inside the
+  graph - over a node, over a label, over the background - instead of depending on
+  which element happens to be the hit target at that pixel. On the canvas it silently
+  did not fire at all. The gesture is then filtered to the canvas's own bounds so a
+  wheel over the scope dropdown still scrolls the dropdown.
+- **There is deliberately no fade-in on render.** There was one, and it set every
+  node and label to `Opacity 0` and animated to 1 - and on this runtime the storyboard
+  did not always run, leaving the labels invisible and the graph blank. A graph that
+  renders nothing is the worst possible failure for this feature, and an entrance
+  animation is worth nothing next to that. The lift and the settle animate a
+  transform and always end on a valid value, so they stayed.
+
+The hint under the graph lists every gesture. It is the only discoverability there
+is for a canvas, and a gesture nobody can find is a feature nobody has.
 ### The graph, and two bugs that made it look empty
 
 Found by looking at the screen, after someone said "I press Graph and nothing
@@ -537,13 +578,22 @@ fine" went unverified for nine phases. It is possible, and worth doing:
 
 - `PrintWindow` with `PW_RENDERFULLCONTENT` (flag 2) captures the window without
   touching it. `CopyFromScreen` works too but only shows whatever is on top.
-- **Do not** call `SetForegroundWindow` or `ShowWindow` on this app's window. Doing
-  so reliably kills the process with the same stowed native exception
-  (0xc000027b, `Microsoft.UI.Xaml.dll`) - the app is fine, the act of raising it
-  is not. Capture first, ask questions later.
-- A crash that appears right after a screenshot is usually this, not the change
-  under test. Check the Application event log for the timestamp and compare it
-  against when the app was launched before blaming the code.
+- `PrintWindow` with `PW_RENDERFULLCONTENT` (flag 2) captures without touching the
+  window. Note that it is **partial on this window**: the right sidebar and the
+  status bar are frequently missing from the capture while the middle renders
+  perfectly. Do not conclude a panel is broken because a capture does not show it;
+  check `BoundingRectangle` through UIAutomation, which reports the real layout.
+- **`SetForegroundWindow` and `ShowWindow` are safe.** An earlier version of this
+  file said they killed the process, and that was wrong: the crash was a
+  hand-written `ControlTemplate` (above), and it was fixed by the ribbon
+  redesign. The false claim mattered, because it stopped the app being brought to
+  the front for testing - which in turn is why the mouse gestures in the graph went
+  unverified for a day. Raising the window first, then sending real `SendInput`
+  mouse and wheel events at it, is how the graph's zoom and drag were tested.
+- Real input works: `SetCursorPos` plus `mouse_event` reaches the app, and
+  UIAutomation's `InvokePattern` works on Buttons. What does **not** work is
+  `PostMessage` for keystrokes - WinUI ignores posted key messages, so Enter in a
+  text box cannot be synthesised from here.
 ## Known Issues
 
 - **A hand-written `ControlTemplate` whose `ContentPresenter` carries the button's
