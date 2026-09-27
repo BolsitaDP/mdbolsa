@@ -9,11 +9,19 @@
     mc:Ignorable="d">
 
     <Grid Padding="24" RowSpacing="8">
+        <!--
+            The star row is the CANVAS, not the status line. It was the other way
+            round, which is why the graph showed nothing at all: a Canvas reports no
+            desired size from its children, so an Auto row containing one collapsed to
+            its border, and the star row - holding a single line of text - took the
+            whole window. The nodes were built, laid out and present in the tree the
+            entire time, in a canvas two pixels tall.
+        -->
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <StackPanel Orientation="Horizontal" Spacing="12">

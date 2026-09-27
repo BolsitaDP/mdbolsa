@@ -45,8 +45,48 @@ public class GraphLayoutTests
 
         var positions = GraphLayout.Compute(graph, 800, 600);
 
+        // A meaningful fraction of the viewport, not "more than one pixel". The old
+        // assertion was `> 1`, and the layout used to satisfy it while compressing
+        // the whole graph into a blob two temperature-widths across - every node at a
+        // technically distinct position, and a graph that looked empty.
         Assert.Equal(2, positions.Count);
-        Assert.True(Distance(positions[0], positions[1]) > 1, "Linked nodes must not collapse onto each other.");
+        Assert.True(
+            Distance(positions[0], positions[1]) > 200,
+            $"Linked nodes collapsed: {Distance(positions[0], positions[1]):F1}px apart in an 800x600 viewport.");
+    }
+
+    [Fact]
+    public void Compute_SpreadsTheGraphAcrossTheViewport()
+    {
+        // The regression that mattered: a graph whose bounding box is a fraction of
+        // the viewport is a graph nobody can read, and it passed every other test.
+        var positions = GraphLayout.Compute(Chain(12), 800, 600);
+
+        var spanX = positions.Max(p => p.X) - positions.Min(p => p.X);
+        var spanY = positions.Max(p => p.Y) - positions.Min(p => p.Y);
+
+        Assert.True(spanX > 400, $"Only {spanX:F0}px of an 800px viewport used horizontally.");
+        Assert.True(spanY > 300, $"Only {spanY:F0}px of a 600px viewport used vertically.");
+    }
+
+    [Fact]
+    public void Compute_KeepsNodesApart_NotJustAtDifferentPositions()
+    {
+        // Distinct coordinates are not the same as legible. Two nodes 3px apart are at
+        // different positions and completely overlap on screen.
+        var positions = GraphLayout.Compute(Chain(12), 800, 600);
+
+        var closest = double.MaxValue;
+        for (var i = 0; i < positions.Count; i++)
+        {
+            for (var j = i + 1; j < positions.Count; j++)
+            {
+                closest = Math.Min(closest, Distance(positions[i], positions[j]));
+            }
+        }
+
+        // Nodes are drawn 2 * NodeRadius across, plus a label underneath.
+        Assert.True(closest > GraphLayout.NodeRadius, $"Two nodes are only {closest:F1}px apart.");
     }
 
     [Fact]
@@ -59,6 +99,9 @@ public class GraphLayoutTests
 
         Assert.Equal(6, positions.Count);
         Assert.Equal(6, positions.Select(p => (p.X, p.Y)).Distinct().Count());
+
+        var spanX = positions.Max(p => p.X) - positions.Min(p => p.X);
+        Assert.True(spanX > 200, $"Isolated nodes only spanned {spanX:F0}px of 800.");
     }
 
     [Fact]

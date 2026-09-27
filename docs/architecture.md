@@ -429,6 +429,40 @@ Two rules that came out of writing it:
 The preview refreshes on a 400ms debounce off the dispatcher, never while typing:
 reading the text on every keystroke and rebuilding the visual tree from a
 text-changed handler is the documented crash.
+### The graph, and two bugs that made it look empty
+
+Found by looking at the screen, after someone said "I press Graph and nothing
+happens". Both were in place and had been since Phase 7. Neither was ever visible
+to the tests, which is the interesting part.
+
+**The canvas was two pixels tall.** `GraphPage.xaml` put the canvas in an `Auto`
+row and the *status line* in the star row. A `Canvas` reports no desired size from
+its children, so an `Auto` row containing one collapses to its border - and the
+star row, holding a single line of text, took the entire window. The graph was
+built, laid out, positioned and sitting in the visual tree the whole time, in a
+canvas the height of a hairline. The star row belongs to the canvas.
+
+**The layout collapsed everything into the middle.** The force simulation ended
+each iteration with
+
+```csharp
+xs[i] = (xs[i] + width / 2) / 2;   // "pull it back toward the middle"
+```
+
+which is not a gentle nudge applied once - it is a contraction applied 300 times.
+The equilibrium of `offset_next = (offset + step) / 2` is about the *step size*,
+not the spacing, so every node in the vault ended up within one temperature of the
+centre no matter how many edges it had: nineteen nodes and thirty-six relationships
+inside a blob about 120 pixels across. Containment is now a clamp, and the finished
+layout is fitted to the viewport afterwards, which is what turns "the algorithm
+converged" into "there is a graph on screen".
+
+The Phase 7 tests passed throughout, because they asserted the wrong things:
+"more than one pixel apart" and "all positions distinct". Both are true of a graph
+collapsed to a point. They now assert a **fraction of the viewport** used, and that
+the two closest nodes are further apart than a node is wide - distinct coordinates
+are not the same as a legible graph. Worth remembering: a test that cannot fail for
+the bug you are worried about is worse than no test, because it is a claim.
 ## Seeing the UI from the shell
 
 Screenshotting this app used to be impossible from here, which is why "it looks
