@@ -17,6 +17,15 @@ Hovering a node lights it and its neighbours and fades the rest, which is what m
 the edges readable instead of noise. Click selects, double-click opens the note, and
 **Reset view** puts every dragged node back.
 
+**Diagrams, drawn from the note itself.** A ```mermaid fence is rendered in the
+preview beside the source, so a flowchart lives in the Markdown and syncs with
+it - there is no image, no new file type, and nothing new for the server to know
+about. Every shape, edge labels, edge chains and subgraphs are drawn; the layout
+reads as a diagram rather than a hairball. Anything outside that subset -
+`sequenceDiagram`, `classDiagram`, a half-written arrow - is shown as **code with
+the reason and the line number**, because a picture that is quietly wrong is worse
+than one that admits it could not be drawn.
+
 **Tokens you can revoke one at a time.** Sync used to need one shared secret
 that every device presented, which meant a lost laptop revoked the whole thing -
 and, since attachments, that secret could also *upload*. The shared token is now

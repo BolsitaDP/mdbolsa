@@ -80,12 +80,17 @@ that [vision.md §14](../vision.md#14-development-philosophy) warns against.
 - Node colours are hardcoded in the shell (blue = note, purple = tag, gold =
   center). Fine for one view; if a second visual representation appears
   (Phase 12's canvas/diagrams), the colour/label decisions should move into a
-  shared presentation layer then, not now.
+  shared presentation layer then, not now. **Done** - Phase 12's diagrams were
+  the second consumer, and the palette now lives in `Presentation`
+  (see [0015](0015-mermaid-diagrams.md)).
 - Zoom is two toolbar buttons plus touch/pen pinch (`ManipulationDelta`);
   mouse-wheel zoom was dropped because `PointerWheelChangedEventArgs` doesn't
   exist in the WinUI metadata this project builds against (verified by
-  inspecting the `.winmd` strings) — not worth fighting the tooling for. Pan is
-  drag, and "Reset view" re-fits.
+  inspecting the `.winmd` strings) - not worth fighting the tooling for. Pan is
+  drag, and "Reset view" re-fits. **This was wrong.** `PointerWheelChanged` does
+  work; the difficulty is that it has to be handled on the *page* rather than on
+  the canvas, because on the canvas it silently never fires. Commit 07a283a added
+  wheel zoom and verified it end to end - see architecture.md.
 - Interaction is click/drag only — no `TextChanged`-driven updates, for the
   reason documented in `MainPage`'s class comment.
 - Node selection shows what a node is and how many relationships it has, and can

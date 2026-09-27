@@ -1168,8 +1168,7 @@ public sealed partial class MainPage : Page
         _previewTimer.Start();
     }
 
-    private void RenderPreview(string markdown)
-    {
+    private void RenderPreview(string markdown)    {
         PreviewPanel.Children.Clear();
 
         var blocks = MarkdownParser.Parse(markdown);
@@ -1191,9 +1190,113 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private static UIElement? BuildBlock(Block block) => block switch
+    /// <summary>
+    /// A code block - or, for ```mermaid, a drawn flowchart.
+    ///
+    /// The rule is the same one the whole preview follows (0013): if it cannot be
+    /// rendered honestly, it is shown as the code it is, and it says why. A reader
+    /// who sees a code block *knows* the diagram did not draw; a reader who sees a
+    /// half-drawn diagram is being lied to and has no way to tell.
+    /// </summary>
+    private static UIElement BuildCodeBlock(Block.Code code)
     {
-        Block.Heading heading => new TextBlock
+        var isMermaid = string.Equals(code.Language, "mermaid", StringComparison.OrdinalIgnoreCase);
+
+        // Declared up front and filled in only for mermaid. Short-circuiting the
+        // call with `isMermaid && TryParse(...)` would leave the `out` variables
+        // unassigned on the other branch, and a note full of ```csharp must not pay
+        // for a parse it will never use.
+        var chart = MdBolsa.Core.Diagrams.Flowchart.Empty;
+        MdBolsa.Core.Diagrams.FlowchartParseError? error = null;
+
+        if (isMermaid)
+        {
+            MdBolsa.Core.Diagrams.FlowchartParser.TryParse(code.Text, out chart, out error);
+        }
+
+        if (isMermaid && error is null && chart.NodeCount > 0)
+        {
+            var panel = new StackPanel { Spacing = 6 };
+            panel.Children.Add(FlowchartPresenter.Create(chart));
+
+            // The diagram is derived from the note; the text is still what is on
+            // disk, and "how do I edit that?" is the first question anybody has
+            // about a picture inside a text editor.
+            //
+            // A button that toggles a panel rather than an Expander. Not an
+            // aesthetic choice: the Known Issues in architecture.md are a list of
+            // control types this runtime has crashed on, and Expander is a type no
+            // other part of this app uses. Introducing one to save a line is a bad
+            // trade when the same effect is two lines of Visibility - the pattern
+            // the sidebar panels already use.
+            var sourcePanel = new Border
+            {
+                Visibility = Visibility.Collapsed,
+                Child = BuildCodeSurface(code.Text),
+            };
+
+            var toggle = new Button
+            {
+                Content = "Show the diagram's code",
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Padding = new Thickness(0),
+            };
+
+            toggle.Click += (_, _) =>
+            {
+                var showing = sourcePanel.Visibility == Visibility.Visible;
+                sourcePanel.Visibility = showing ? Visibility.Collapsed : Visibility.Visible;
+                toggle.Content = showing ? "Show the diagram's code" : "Hide the diagram's code";
+            };
+
+            panel.Children.Add(toggle);
+            panel.Children.Add(sourcePanel);
+
+            foreach (var warning in chart.Warnings) panel.Children.Add(BuildNotice(warning));
+
+            return panel;
+        }
+
+        var fallback = new StackPanel { Spacing = 4 };
+        fallback.Children.Add(BuildCodeSurface(code.Text));
+
+        // Only for mermaid, and only when it failed: a note full of ```csharp must
+        // not collect explanations about its own code fences.
+        if (isMermaid)
+        {
+            fallback.Children.Add(BuildNotice(
+                error?.ToString() ?? "This diagram could not be drawn, so it is shown as code."));
+        }
+
+        return fallback;
+    }
+
+    private static UIElement BuildNotice(string text) => new TextBlock
+    {
+        Text = text,
+        FontSize = 11,
+        TextWrapping = TextWrapping.Wrap,
+        Opacity = 0.8,
+        Foreground = new SolidColorBrush(Presentation.Warning),
+    };
+
+    private static UIElement BuildCodeSurface(string text) => new Border
+    {
+        CornerRadius = new CornerRadius(6),
+        Padding = new Thickness(12, 10, 12, 10),
+        Background = (Brush)Application.Current.Resources["CodeBackgroundBrush"],
+        Child = new TextBlock
+        {
+            Text = text,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 12,
+            IsTextSelectionEnabled = true,
+            TextWrapping = TextWrapping.NoWrap,
+        },
+    };
+
+    private static UIElement? BuildBlock(Block block) => block switch
+    {        Block.Heading heading => new TextBlock
         {
             Text = Rendered(heading.Inlines),
             FontSize = HeadingSize(heading.Level),
@@ -1212,20 +1315,7 @@ public sealed partial class MainPage : Page
 
         Block.Quote quote => BuildQuote(quote),
 
-        Block.Code code => new Border
-        {
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(12, 10, 12, 10),
-            Background = (Brush)Application.Current.Resources["CodeBackgroundBrush"],
-            Child = new TextBlock
-            {
-                Text = code.Text,
-                FontFamily = new FontFamily("Consolas"),
-                FontSize = 12,
-                IsTextSelectionEnabled = true,
-                TextWrapping = TextWrapping.NoWrap,
-            },
-        },
+        Block.Code code => BuildCodeBlock(code),
 
         Block.Rule => new ShapeRectangle
         {

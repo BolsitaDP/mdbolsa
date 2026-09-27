@@ -393,6 +393,46 @@ that is the whole argument for the client-side tests.
 
 See [0014-per-device-tokens](decisions/0014-per-device-tokens.md) for what this
 deliberately leaves out: no expiry, no per-device scopes, no accounts.
+## Diagrams (Phase 12, first half)
+
+A ```` ```mermaid ```` fence is drawn in the preview, beside the source. Markdown
+stays canonical - the diagram is a second reading of text that was always in the
+note, not a file, not a picture, and not anything the sync has to know about.
+
+- `FlowchartParser` reads the flowchart subset of Mermaid by hand, in Core,
+  beside the Markdown parser and for the same reason (0013). No Mermaid.js, no
+  WebView2, and a rendering path that a unit test can reach.
+- **It refuses rather than approximates.** Anything outside the subset - every
+  other diagram type, an unclosed subgraph, `A B` with no arrow between them -
+  returns a parse failure, and the shell shows the block as code *with the reason
+  and the line number*. A partial diagram would look right and be wrong about
+  what the person wrote, and the reader could not tell. `style`, `classDef` and
+  `click` are the exception: skipped **with a warning**, because they change
+  appearance and never meaning.
+- `FlowchartLayout` is a second layout algorithm, not a reuse of the graph's.
+  Longest-path ranking plus barycentre crossing reduction, then a push-apart pass
+  and a pull-back pass. The force layout is right for a relationship map and
+  wrong for a decision tree.
+- `MinimumScale = 0.6`. A diagram is never shrunk past legibility to force it to
+  fit; past the floor it reports a bigger content extent and the shell scrolls.
+  Found by a test: the first version shrank a ten-node diagram until every label
+  was an ellipsis - a picture that fit perfectly and said nothing.
+- `Presentation` now holds the palette both views read. That is ADR 0009's own
+  note, written when there was one consumer and acted on when there were two.
+- 96 tests: 59 on the parser, 17 on the layout, 20 over the four diagrams in
+  `Ejemplo/Diagramas.md` - which stand in for the XAML, since a desktop window's
+  drawing code cannot be reached from a test.
+
+Two crashes, one of them mine, both the same lesson as every other entry in the
+Known Issues: mutating a child's size or position from inside `SizeChanged`
+re-enters layout and kills the process with `0xc000027b`, and the fix is to defer
+to the next dispatcher turn. And the `Expander` introduced here was removed on
+sight - it was a control type nothing else in the app used, which is exactly what
+that Known Issues list is for.
+
+**Not verified**: that the boxes appear. See
+[0015](decisions/0015-mermaid-diagrams.md) for the full reasoning, including why
+the canvas is the second half rather than the first.
 ## The shell (Obsidian-shaped)
 
 The window is a deliberate imitation of Obsidian's: a narrow icon ribbon, the
