@@ -402,6 +402,33 @@ inside it, and a tool that makes them do that has misunderstood the request.
   controls from inside a text input's own event is one of the patterns that crashes
   this runtime. A field that can only be submitted with one particular key is a
   field some people cannot use at all.
+### Live preview, beside the source
+
+A read-only pane next to the editor that renders the open note as Markdown
+(`Ctrl+R`). It is a **projection, never the source**: saving writes the `TextBox`,
+exactly as it always did, and the editor's crash-prone paths are untouched. The
+decision not to *replace* the editor with a rendered view, and why the renderer is
+hand-written in Core instead of a library, is
+[0013-live-preview-and-source](decisions/0013-live-preview-and-source.md).
+
+`MarkdownParser` (Core) is line-based: block first, then inline, with a closed set
+of output shapes (`Block`/`Inline`) so it can be tested without any UI - which, given
+this app's crash history, is the only way a component like this can be developed at
+all. 60 tests, and the last group of them pins down what it does **not** do, so a
+degradation nobody discovers is a limitation rather than a bug report.
+
+Two rules that came out of writing it:
+
+- **Unrendered syntax is never shown as punctuation.** `**bold**` renders as "bold"
+  without the stars. A missing style is a limitation; a stray `**` is a bug.
+- **Emphasis openers follow whitespace, closers do not.** The first version had the
+  whitespace rule on the wrong side, so the extremely common `con **negritas**` did
+  not render at all - and the "2 * 3 * 4" case it was meant to protect is actually
+  handled by the *closing* rule. A test with a real sentence found it.
+
+The preview refreshes on a 400ms debounce off the dispatcher, never while typing:
+reading the text on every keystroke and rebuilding the visual tree from a
+text-changed handler is the documented crash.
 ## Seeing the UI from the shell
 
 Screenshotting this app used to be impossible from here, which is why "it looks

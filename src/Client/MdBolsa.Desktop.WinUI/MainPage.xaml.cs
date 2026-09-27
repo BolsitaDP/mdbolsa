@@ -1,5 +1,6 @@
 using MdBolsa.Contracts;
 using MdBolsa.Core.Links;
+using MdBolsa.Core.Markdown;
 using MdBolsa.Core.Search;
 using MdBolsa.Core.Tags;
 using MdBolsa.Core.Sync;
@@ -12,6 +13,8 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using System.Runtime.InteropServices;
 using Windows.Foundation;
+using ShapePath = Microsoft.UI.Xaml.Shapes.Path;
+using ShapeRectangle = Microsoft.UI.Xaml.Shapes.Rectangle;
 using Windows.System;
 using PathShape = Microsoft.UI.Xaml.Shapes.Path;
 
@@ -119,6 +122,17 @@ public sealed partial class MainPage : Page
         // every 30 seconds and, when there is no server configured, decides to do
         // nothing at all - so it needs no separate on/off.
         _syncTicker.Start();
+
+        // One-shot and rearmed, like the sync debounce: the preview updates a beat
+        // after you stop typing, never while you are.
+        _previewTimer = DispatcherQueue.CreateTimer();
+        _previewTimer.Interval = PreviewDelay;
+        _previewTimer.IsRepeating = false;
+        _previewTimer.Tick += (_, _) =>
+        {
+            _previewTimer.Stop();
+            RenderPreview(ReadCurrentNoteContent() ?? string.Empty);
+        };
     }
 
     // The write path calls this. Rearming a one-shot timer is the entire debounce:
@@ -981,6 +995,187 @@ public sealed partial class MainPage : Page
         return true;
     }
 
+    // --- Live preview (docs/decisions/0013) --------------------------------
+
+    // A read-only pane beside the source, rendering the open note as Markdown. It is
+    // a projection and never the source of truth: saving writes the TextBox, exactly
+    // as it did before this pane existed, and the editor's crash-prone paths are
+    // untouched. See 0013 for why the editor was not replaced by a rendered view.
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _previewTimer;
+
+    private static readonly TimeSpan PreviewDelay = TimeSpan.FromMilliseconds(400);
+
+    private void OnPreviewClicked(object sender, RoutedEventArgs e) => TogglePreview();
+
+    private void OnTogglePreviewAccelerator(
+        KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        TogglePreview();
+
+    private void TogglePreview()
+    {
+        var showing = PreviewHost.Visibility == Visibility.Visible;
+        PreviewHost.Visibility = showing ? Visibility.Collapsed : Visibility.Visible;
+        PreviewRibbonButton.Opacity = showing ? 0.55 : 1;
+
+        if (showing) return;
+
+        RenderPreview(ReadCurrentNoteContent() ?? string.Empty);
+    }
+
+    // Re-rendering is debounced onto the dispatcher. Reading the text on every
+    // keystroke and rebuilding the visual tree from a text-changed handler is exactly
+    // the pattern that crashes this runtime, so the preview is allowed to be a
+    // fraction of a second behind the caret - which, at 400ms, nobody can see.
+    private void SchedulePreviewRefresh()
+    {
+        if (PreviewHost.Visibility != Visibility.Visible) return;
+
+        _previewTimer.Stop();
+        _previewTimer.Start();
+    }
+
+    private void RenderPreview(string markdown)
+    {
+        PreviewPanel.Children.Clear();
+
+        var blocks = MarkdownParser.Parse(markdown);
+        if (blocks.Count == 0)
+        {
+            PreviewPanel.Children.Add(new TextBlock
+            {
+                Text = "Nothing to preview.",
+                Opacity = 0.6,
+                FontSize = 12,
+            });
+            return;
+        }
+
+        foreach (var block in blocks)
+        {
+            var element = BuildBlock(block);
+            if (element is not null) PreviewPanel.Children.Add(element);
+        }
+    }
+
+    private static UIElement? BuildBlock(Block block) => block switch
+    {
+        Block.Heading heading => new TextBlock
+        {
+            Text = Rendered(heading.Inlines),
+            FontSize = HeadingSize(heading.Level),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        },
+
+        Block.Paragraph paragraph => new TextBlock
+        {
+            Text = Rendered(paragraph.Inlines),
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 21,
+        },
+
+        Block.List list => BuildList(list),
+
+        Block.Quote quote => BuildQuote(quote),
+
+        Block.Code code => new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(12, 10, 12, 10),
+            Background = (Brush)Application.Current.Resources["CodeBackgroundBrush"],
+            Child = new TextBlock
+            {
+                Text = code.Text,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 12,
+                IsTextSelectionEnabled = true,
+                TextWrapping = TextWrapping.NoWrap,
+            },
+        },
+
+        Block.Rule => new ShapeRectangle
+        {
+            Height = 1,
+            Margin = new Thickness(0, 4, 0, 4),
+            Fill = (Brush)Application.Current.Resources["DividerBrush"],
+        },
+
+        // The image is named but not fetched: a preview that reached the network (or
+        // the filesystem, to resolve a relative path) would be a preview with side
+        // effects. What the note says about the image is shown instead.
+        Block.Image image => new TextBlock
+        {
+            Text = $"image: {image.Source}",
+            Opacity = 0.6,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        },
+
+        _ => null,
+    };
+
+    private static Border BuildQuote(Block.Quote quote)
+    {
+        var inner = new StackPanel { Spacing = 8 };
+        foreach (var child in quote.Blocks.Select(BuildBlock).OfType<UIElement>())
+        {
+            inner.Children.Add(child);
+        }
+
+        return new Border
+        {
+            BorderThickness = new Thickness(3, 0, 0, 0),
+            BorderBrush = (Brush)Application.Current.Resources["DividerBrush"],
+            Padding = new Thickness(12, 0, 0, 0),
+            Child = inner,
+        };
+    }
+
+    private static UIElement BuildList(Block.List list)
+    {
+        var panel = new StackPanel { Spacing = 4 };
+
+        var number = list.Start;
+        foreach (var item in list.Items)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                // The marker is text, not a bullet glyph: a numbered list that starts
+                // at 3 has to show "3.", and a bullet list shows "-", so the reader
+                // sees what the file says.
+                Text = $"{Marker(list, number++)}  {Rendered(item)}",
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 21,
+            });
+        }
+
+        return panel;
+    }
+
+    private static string Marker(Block.List list, int number) =>
+        list.Ordered ? $"{number}." : "-";
+
+    private static double HeadingSize(int level) => level switch
+    {
+        1 => 22,
+        2 => 18,
+        3 => 15,
+        _ => 13,
+    };
+
+    // The text a reader sees. A link shows its label, a wiki link its alias if it has
+    // one, emphasis and code their contents - the markers never reach the reader,
+    // which is the rule that keeps a preview from looking broken.
+    private static string Rendered(IReadOnlyList<Inline> inlines) =>
+        string.Concat(inlines.Select(inline => inline switch
+        {
+            Inline.Text text => text.Value,
+            Inline.Code code => code.Value,
+            Inline.WikiLink wiki => wiki.Alias is null ? wiki.Target : wiki.Alias,
+            Inline.Link link => Rendered(link.Label),
+            Inline.Emphasis emphasis => Rendered(emphasis.Children),
+            _ => string.Empty,
+        }));
     // --- Note history (Phase 10, client side) ------------------------------
 
     // The server keeps every revision and the client can ask for them; until this
@@ -1602,6 +1797,8 @@ public sealed partial class MainPage : Page
         ShowBacklinks(relativePath);
         ShowWordCount(content);
 
+        if (PreviewHost.Visibility == Visibility.Visible) RenderPreview(content);
+
         // The history is a network read, so it is kicked off rather than awaited:
         // opening a note must not wait on the server, and the panel fills in when it
         // answers. RenderHistory is async void for that reason and only touches the
@@ -1741,6 +1938,10 @@ public sealed partial class MainPage : Page
             StatusText.Text = "Saved.";
 
             ScheduleSyncAfterWrite();
+
+            // The file on disk is what the preview shows, so it refreshes from what
+            // was just written rather than from the text box's current contents.
+            if (PreviewHost.Visibility == Visibility.Visible) RenderPreview(text);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {

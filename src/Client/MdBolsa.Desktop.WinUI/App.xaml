@@ -128,6 +128,18 @@
                 above), so it picks a middle value that works in both.
             -->
             <SolidColorBrush x:Key="ChevronBrush" Color="#7A7A7A" />
+
+            <!--
+                The preview pane's rule and code background. Declared here rather than
+                looked up by key in code, because a theme brush cannot be fetched from
+                Application.Current.Resources - only what the app declares itself is
+                reachable there. These two are declared *as* theme resources, so they
+                still follow the system light/dark setting.
+            -->
+            <SolidColorBrush x:Key="DividerBrush"
+                             Color="{ThemeResource TextFillColorSecondaryBrush}" />
+            <SolidColorBrush x:Key="CodeBackgroundBrush"
+                             Color="{ThemeResource SubtleFillColorSecondaryBrush}" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

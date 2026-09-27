@@ -10,6 +10,14 @@ Full requirements: [docs/vision.md](docs/vision.md). Architecture:
 
 ## Status
 
+**A live preview, beside the source.** `Ctrl+R` opens a read-only pane that renders
+the open note as Markdown - headings, lists, quotes, code, links, bold and italic -
+while the plain-text editor stays exactly where it was. The preview is a projection
+and never the source: saving still writes the text box, so the file and the screen
+cannot start disagreeing. What it does not render (tables, task checkboxes, nested
+lists) is named in
+[0013](docs/decisions/0013-live-preview-and-source.md) rather than pretended.
+
 **Search and a quick switcher.** Typing part of a note's *name* finds it, even when
 the name never appears in the note itself - which is what FTS5, an index over note
 text, structurally cannot do. Matches rank exact, then prefix, then word-start, then
