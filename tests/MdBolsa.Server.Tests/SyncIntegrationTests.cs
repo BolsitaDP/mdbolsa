@@ -13,11 +13,11 @@ namespace MdBolsa.Server.Tests;
 // device, and hit a genuine two-sided conflict.
 //
 // This needs the dev stack up (`docker compose up -d` and
-// `dotnet run --project src/Server/MdBolsa.Server`). When it isn't, the tests
-// return early rather than failing: a missing local database is not a bug in the
-// sync code, and a test suite that demands Docker is a test suite nobody runs.
-// The rest of the sync behaviour is covered without a server in
-// MdBolsa.Core.Tests.Sync.NoteSyncClientTests.
+// `dotnet run --project src/Server/MdBolsa.Server`). When it isn't, the tests are
+// reported as *skipped* rather than failing - and not as passed: see DevStack.
+// A missing local database is not a bug in the sync code, and a test suite that
+// demands Docker is a test suite nobody runs. The rest of the sync behaviour is
+// covered without a server in MdBolsa.Core.Tests.Sync.NoteSyncClientTests.
 [Collection(IntegrationCollection.Name)]
 public class SyncIntegrationTests : IDisposable
 {
@@ -40,7 +40,7 @@ public class SyncIntegrationTests : IDisposable
         // whatever else is in it. Leaving rows behind would make a later run pull
         // a previous run's notes into its vault, which is confusing rather than
         // wrong - so clean up after ourselves.
-        if (!ServerIsUp() || _createdNoteIds.Count == 0) return;
+        if (!DevStack.Available || _createdNoteIds.Count == 0) return;
 
         try
         {
@@ -84,23 +84,6 @@ public class SyncIntegrationTests : IDisposable
     // Probed once per test run: with a 2-second timeout, asking per test (and
     // again in Dispose) would add half a minute of waiting to a suite that is
     // supposed to be fast.
-    private static readonly bool ServerAvailable = ProbeServer();
-
-    private static bool ServerIsUp() => ServerAvailable;
-
-    private static bool ProbeServer()
-    {
-        try
-        {
-            using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            return probe.GetAsync($"{BaseAddress}health").GetAwaiter().GetResult().IsSuccessStatusCode;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            return false;
-        }
-    }
-
     private NoteSyncClient Client(ISyncStateStore state, IVaultIndex vaultIndex) =>
         new(new HttpClient { BaseAddress = new Uri(BaseAddress) }, _deviceId, Token, state, vaultIndex);
 
@@ -144,11 +127,9 @@ public class SyncIntegrationTests : IDisposable
         return id;
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task A_NewNote_IsPushedToTheServer()
     {
-        if (!ServerIsUp()) return;
-
         var id = WriteNote(Folder("Pushed.md"), "# Pushed");
         Scan();
         var state = new SqliteSyncStateStore(_dbPath);
@@ -164,11 +145,9 @@ public class SyncIntegrationTests : IDisposable
         Assert.Equal(Folder("Pushed.md"), stored!.RelativePath);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AChangeFromAnotherDevice_IsPulledIntoTheVault()
     {
-        if (!ServerIsUp()) return;
-
         var id = WriteNote(Folder("Shared.md"), "# Original");
         Scan();
         var state = new SqliteSyncStateStore(_dbPath);
@@ -192,11 +171,9 @@ public class SyncIntegrationTests : IDisposable
         Assert.Contains("Edited on the other device", File.ReadAllText(Path.Combine(_vaultRoot, Folder("Shared.md"))));
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task ATombstoneFromAnotherDevice_DeletesTheLocalFile()
     {
-        if (!ServerIsUp()) return;
-
         var id = WriteNote(Folder("Doomed.md"), "# Doomed");
         Scan();
         await Client(new SqliteSyncStateStore(_dbPath), OpenVaultIndex()).SyncAsync(_vaultRoot);
@@ -213,11 +190,9 @@ public class SyncIntegrationTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_vaultRoot, Folder("Doomed.md"))));
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AConflict_IsReportedAndNeitherVersionIsOverwritten()
     {
-        if (!ServerIsUp()) return;
-
         var id = WriteNote(Folder("Contested.md"), "# Original");
         Scan();
         var state = new SqliteSyncStateStore(_dbPath);
@@ -254,11 +229,9 @@ public class SyncIntegrationTests : IDisposable
         Assert.Contains(new SqliteSyncStateStore(_dbPath).GetConflicts(), c => c.NoteId == id);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AWrongToken_FailsWithoutTouchingTheVault()
     {
-        if (!ServerIsUp()) return;
-
         WriteNote(Folder("Local.md"), "# Local");
         Scan();
         var localPath = Path.Combine(_vaultRoot, Folder("Local.md"));
@@ -278,11 +251,9 @@ public class SyncIntegrationTests : IDisposable
         Assert.Equal(before, File.ReadAllText(localPath));
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task SyncingTwice_SendsNothingTheSecondTime()
     {
-        if (!ServerIsUp()) return;
-
         WriteNote(Folder("Stable.md"), "# Stable");
         Scan();
         var state = new SqliteSyncStateStore(_dbPath);

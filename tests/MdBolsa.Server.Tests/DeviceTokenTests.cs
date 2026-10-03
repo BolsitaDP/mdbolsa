@@ -34,8 +34,6 @@ public class DeviceTokenTests : IDisposable
         Password = "mdbolsa_dev",
     }.ConnectionString;
 
-    private static readonly bool ServerAvailable = ProbeServer();
-
     // Every device this test mints is removed in Dispose, so a run leaves the
     // shared dev database with the same devices it found. The database is shared
     // with every other integration test (see IntegrationCollection), and a test
@@ -44,7 +42,7 @@ public class DeviceTokenTests : IDisposable
 
     public void Dispose()
     {
-        if (!ServerAvailable || _minted.Count == 0) return;
+        if (!DevStack.Available || _minted.Count == 0) return;
 
         try
         {
@@ -67,11 +65,9 @@ public class DeviceTokenTests : IDisposable
         }
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task Minted_token_works_for_the_api_and_survives_in_a_list()
     {
-        if (!ServerAvailable) return;
-
         using var owner = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(15) };
         owner.DefaultRequestHeaders.Add(SyncHeaders.Token, SharedToken);
 
@@ -93,11 +89,9 @@ public class DeviceTokenTests : IDisposable
         Assert.False(found.Revoked);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task The_shared_token_still_works()
     {
-        if (!ServerAvailable) return;
-
         // The whole design rests on this. A client that was configured before this
         // phase must keep syncing, or "security" has become "nobody can sync".
         using var http = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(15) };
@@ -107,11 +101,9 @@ public class DeviceTokenTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task A_device_token_cannot_mint_another_device()
     {
-        if (!ServerAvailable) return;
-
         using var owner = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(15) };
         owner.DefaultRequestHeaders.Add(SyncHeaders.Token, SharedToken);
 
@@ -130,11 +122,9 @@ public class DeviceTokenTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, revoke.StatusCode);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task A_revoked_token_stops_working_at_once()
     {
-        if (!ServerAvailable) return;
-
         using var owner = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(15) };
         owner.DefaultRequestHeaders.Add(SyncHeaders.Token, SharedToken);
 
@@ -160,11 +150,9 @@ public class DeviceTokenTests : IDisposable
         Assert.True(entry.Revoked);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task A_revoked_token_cannot_upload_either()
     {
-        if (!ServerAvailable) return;
-
         using var owner = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(15) };
         owner.DefaultRequestHeaders.Add(SyncHeaders.Token, SharedToken);
 
@@ -193,11 +181,9 @@ public class DeviceTokenTests : IDisposable
         Assert.Equal(0L, (long)(await check.ExecuteScalarAsync())!);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task A_device_with_no_name_is_refused_with_a_reason()
     {
-        if (!ServerAvailable) return;
-
         using var http = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(15) };
         http.DefaultRequestHeaders.Add(SyncHeaders.Token, SharedToken);
 
@@ -209,11 +195,9 @@ public class DeviceTokenTests : IDisposable
         Assert.Empty((await ListAsync(http)).Where(entry => string.IsNullOrWhiteSpace(entry.Name)));
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task A_token_that_is_not_a_device_token_is_rejected()
     {
-        if (!ServerAvailable) return;
-
         using var http = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(15) };
         http.DefaultRequestHeaders.Add(SyncHeaders.Token, "mdb_" + new string('0', 32));
 
@@ -261,21 +245,5 @@ public class DeviceTokenTests : IDisposable
         response.EnsureSuccessStatusCode();
 
         return await response.Content.ReadFromJsonAsync<List<DeviceSummary>>() ?? [];
-    }
-
-    private static bool ProbeServer()
-    {
-        try
-        {
-            using var http = new HttpClient { BaseAddress = new Uri(BaseAddress), Timeout = TimeSpan.FromSeconds(3) };
-            http.DefaultRequestHeaders.Add(SyncHeaders.Token, SharedToken);
-            return http.GetAsync("health").GetAwaiter().GetResult().IsSuccessStatusCode;
-        }
-        catch
-        {
-            // No server running. These are integration tests against a real one;
-            // skipping is the established pattern here (see AttachmentIntegrationTests).
-            return false;
-        }
     }
 }

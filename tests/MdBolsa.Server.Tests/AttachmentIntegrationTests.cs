@@ -35,8 +35,6 @@ public class AttachmentIntegrationTests : IDisposable
         Password = "mdbolsa_dev",
     }.ConnectionString;
 
-    private static readonly bool ServerAvailable = ProbeServer();
-
     private readonly string _vaultRoot = Directory.CreateTempSubdirectory("mdbolsa-attach-e2e-").FullName;
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mdbolsa-attach-{Guid.NewGuid()}.db");
     private readonly Guid _deviceId = Guid.NewGuid();
@@ -58,7 +56,7 @@ public class AttachmentIntegrationTests : IDisposable
             catch (IOException) { /* a leftover temp file is not a test failure */ }
         }
 
-        if (!ServerAvailable) return;
+        if (!DevStack.Available) return;
 
         // Best-effort: rows keyed by the hashes this run created.
         try
@@ -83,19 +81,6 @@ public class AttachmentIntegrationTests : IDisposable
         }
         catch (Exception ex) when (ex is Npgsql.NpgsqlException or System.Net.Sockets.SocketException)
         {
-        }
-    }
-
-    private static bool ProbeServer()
-    {
-        try
-        {
-            using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            return probe.GetAsync($"{BaseAddress}health").GetAwaiter().GetResult().IsSuccessStatusCode;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            return false;
         }
     }
 
@@ -134,11 +119,9 @@ public class AttachmentIntegrationTests : IDisposable
         return $"{(int)response.StatusCode}|{await response.Content.ReadAsStringAsync()}";
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AnAttachmentRoundTrips()
     {
-        if (!ServerAvailable) return;
-
         var content = Encoding.UTF8.GetBytes("the quick brown fox");
         var hash = AttachmentHash.Of(content);
 
@@ -152,11 +135,9 @@ public class AttachmentIntegrationTests : IDisposable
         Assert.Equal(content, await download.Content.ReadAsByteArrayAsync());
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task UploadingTheSameThingTwiceIsNotAnError()
     {
-        if (!ServerAvailable) return;
-
         var content = Encoding.UTF8.GetBytes("idempotent");
         var hash = AttachmentHash.Of(content);
 
@@ -169,11 +150,9 @@ public class AttachmentIntegrationTests : IDisposable
         Assert.Single(page.Attachments, a => a.Hash == hash);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AHashThatDoesNotMatchTheBytesIsRefused()
     {
-        if (!ServerAvailable) return;
-
         // The important one. A server that believed the client would store corruption
         // and hand it to every device that asked, and nobody would find out until an
         // image failed to open weeks later.
@@ -185,11 +164,9 @@ public class AttachmentIntegrationTests : IDisposable
         Assert.Contains("does not match", result);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AnOversizedUploadIsRefusedAndNothingIsStored()
     {
-        if (!ServerAvailable) return;
-
         // The contract is "it is refused and nothing is kept", not a particular status
         // code. Refusing *before* reading a 33 MB body is the right behaviour - it is
         // the whole point of the cap - and it means the connection is closed while the
@@ -224,22 +201,18 @@ public class AttachmentIntegrationTests : IDisposable
         Assert.Null(status is null ? null : status == HttpStatusCode.OK ? status : null);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AnUnknownAttachmentIsNotFound()
     {
-        if (!ServerAvailable) return;
-
         using var http = Client();
         var response = await http.GetAsync($"api/attachments/{new string('b', 64)}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AMalformedHashIsRejectedRatherThanQueried()
     {
-        if (!ServerAvailable) return;
-
         using var http = Client();
 
         // Whatever is in the path must never reach SQL as anything but a parameter, and
@@ -248,11 +221,9 @@ public class AttachmentIntegrationTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await http.PutAsync("api/attachments/not-a-hash", new StringContent("x"))).StatusCode);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task TheChangesListIsPaged()
     {
-        if (!ServerAvailable) return;
-
         var hashes = new List<string>();
         for (var i = 0; i < 3; i++)
         {
@@ -294,11 +265,9 @@ public class AttachmentIntegrationTests : IDisposable
         Assert.Empty(overlap);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AClientSyncPushesAndThenPullsBackTheSameFile()
     {
-        if (!ServerAvailable) return;
-
         // The whole phase, end to end: a file in a vault goes up, and a *different*
         // vault on the same server gets it back under the same name.
         var content = Encoding.UTF8.GetBytes("shared between two vaults");
@@ -356,11 +325,9 @@ public class AttachmentIntegrationTests : IDisposable
         }
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task ASecondSyncOfTheSameVaultPushesNothing()
     {
-        if (!ServerAvailable) return;
-
         WriteAttachment($"{AttachmentHash.Of("only once"u8.ToArray())}.txt", "only once");
         new AttachmentScanner(_vaultRoot, new SqliteAttachmentIndex(_dbPath)).Scan();
         _uploaded.Add(AttachmentHash.Of("only once"u8.ToArray()));
@@ -375,11 +342,9 @@ public class AttachmentIntegrationTests : IDisposable
         Assert.Equal(0, second.Pushed);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task ATruncatedDownloadIsDetectedAndNotIndexed()
     {
-        if (!ServerAvailable) return;
-
         // If a short download were accepted, the next sync would see the expected
         // hash in the index and skip the file forever - a permanently corrupt image
         // with nothing to report it.
