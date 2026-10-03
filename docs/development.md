@@ -20,6 +20,27 @@ dotnet build src/MdBolsa.sln
 dotnet test src/MdBolsa.sln
 ```
 
+### The end-to-end server tests
+
+Half of `MdBolsa.Server.Tests` (sync, attachments, device tokens, version
+history) drives the real client against a **running server and a real
+PostgreSQL**. Without them those tests are reported as **skipped**, with the
+reason - not as passed - so read the totals: `Passed: 27, Skipped: 27` means the
+sync paths were *not* exercised.
+
+To run them for real:
+
+```bash
+docker compose up -d                              # Postgres, 127.0.0.1:5432
+dotnet run --project src/Server/MdBolsa.Server    # the API, http://localhost:5080
+dotnet test tests/MdBolsa.Server.Tests            # in another terminal
+```
+
+Set `MDBOLSA_REQUIRE_SERVER=1` to make a missing stack a **failure** instead of
+a skip - use it before tagging a release, where green has to mean tested. The
+tests tidy up the rows they create, so they can be run repeatedly against the
+shared development database; they never touch anything but `localhost`.
+
 ## Run the Desktop Shell
 
 Double-click the **`mdbolsa.lnk`** shortcut on the desktop. It runs

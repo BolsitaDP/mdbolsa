@@ -34,7 +34,7 @@ inside it. Two scrollbars, one of them yours to move, and the page always wins.
 **Tokens you can revoke one at a time.** Sync used to need one shared secret
 that every device presented, which meant a lost laptop revoked the whole thing -
 and, since attachments, that secret could also *upload*. The shared token is now
-just the bootstrap: press **Create this device''s token** in sync settings once and
+just the bootstrap: press **Create this device's token** in sync settings once and
 this machine gets a credential of its own, listed by name on the server, and
 `DELETE /api/devices/{id}` takes exactly that one away. A device token cannot
 mint more of them, and the server keeps only a hash, so the secret is never
@@ -46,7 +46,7 @@ on every device, and **an attachment cannot conflict** — a hash has exactly on
 possible content. The server verifies the hash it is sent rather than trusting the
 client, and caps the size. `![[diagram.png]]` and `![](Attachments/x.png)` both
 render as pictures in the preview, and one that is missing says so. See
-[0011](docs/decisions/0011-attachments.md).
+[0016](docs/decisions/0016-attachments.md).
 
 **A live preview, beside the source.** `Ctrl+R` opens a read-only pane that renders
 the open note as Markdown - headings, lists, quotes, code, links, bold and italic -
@@ -110,10 +110,13 @@ a note never touches the network, so typing never waits on sync. Configure it
 once with **Sync settings...** (server URL and shared token).
 
 **Phase 8 - Server foundation.** `MdBolsa.Server`: an ASP.NET Core API over
-PostgreSQL. **No authentication** beyond one shared token - an explicit,
-temporary decision, see [0010](docs/decisions/0010-server-foundation.md) - so it
-binds to localhost only, and in Production it refuses to start without a token.
-See [docs/deployment.md](docs/deployment.md).
+PostgreSQL ([0010](docs/decisions/0010-server-foundation.md)). It started with no
+authentication; every `/api` route now needs a token - one shared bootstrap token
+plus a revocable token per device ([0011](docs/decisions/0011-client-sync.md),
+[0014](docs/decisions/0014-per-device-tokens.md)). It speaks plain HTTP, so it
+binds to localhost and is meant to be reached over a VPN or an SSH tunnel, or
+behind TLS. In Production it refuses to start without a connection string and a
+token. See [docs/deployment.md](docs/deployment.md).
 
 Earlier phases: the WinUI shell opens a vault (Windows folder picker, choice
 remembered), lists its notes, lets you open/edit/save one as plain Markdown text

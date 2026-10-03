@@ -1,6 +1,9 @@
 # 0010-server-foundation
 
-- **Status:** Accepted
+- **Status:** Accepted - except *no authentication*, which was superseded by
+  [0011-client-sync](0011-client-sync.md) (a shared token) and
+  [0014-per-device-tokens](0014-per-device-tokens.md) (a revocable token per
+  device). PostgreSQL, the dev/prod isolation and the paging rules still stand.
 - **Date:** 2026-09-26
 
 ## Context

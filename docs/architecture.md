@@ -223,10 +223,14 @@ Concretely:
 - The server stores notes byte-for-byte and never parses Markdown or computes
   hashes: the `.md` file stays the source of truth and the client stays the only
   thing that understands it.
-- **No authentication**, explicitly and temporarily. What makes that safe today
-  is that nothing exposes the API: it binds to `localhost:5080` in development,
-  and the compose files publish Postgres on `127.0.0.1` only. Adding auth is the
-  first thing before the Pi, and it is Phase 9 first job.
+- **No authentication - as built in Phase 8, and no longer true.** It was explicit
+  and temporary: nothing exposed the API, which bound to `localhost:5080` in
+  development while the compose files published Postgres on `127.0.0.1` only.
+  Phase 9 put a shared token in front of every `/api` route
+  ([0011-client-sync](decisions/0011-client-sync.md)) and per-device tokens
+  replaced it as the everyday credential ([Per-device tokens](#per-device-tokens),
+  [0014](decisions/0014-per-device-tokens.md)). Today Production refuses to start
+  without a `Sync:Token`; only `/health` is open.
 - Dev/Prod isolation is enforced in code, not by discipline: **in Production the
   server refuses to start** without an explicit `ConnectionStrings:Postgres`, so
   a development build cannot reach production by accident. Environment and
@@ -237,9 +241,10 @@ Concretely:
   non-root). All persistent state hangs off one configurable `APP_DATA_PATH`, so
   the microSD to SSD move is a data copy plus an environment variable.
 - 14 tests cover `NoteValidation` (the rules with decisions in them).
-  `NoteStore` itself is not unit-tested - it needs a real PostgreSQL;
-  integration tests against the compose database are a Phase 9 item and should
-  replace the hand-run `curl` sequence that verified this phase.
+  `NoteStore` itself is not unit-tested - it needs a real PostgreSQL. Phase 9
+  added the integration tests against the compose database that replaced the
+  hand-run `curl` sequence which verified this phase; they need the dev stack and
+  are reported as skipped without it (see `docs/development.md`).
 - Two Npgsql details that cost time here: named parameters are `@name`, **not**
   `$name` (PostgreSQL own placeholder syntax reaches the server literally and
   fails with "syntax error at or near $"), and a multi-statement command cannot
@@ -913,11 +918,12 @@ fine" went unverified for nine phases. It is possible, and worth doing:
   by design); searching a term in a note's body returns it with a
   correct snippet; clicking a result opens that note in the editor;
   "Show all notes" correctly resets the list.
-- Phase 6 (tags/metadata) is covered by tests only so far — the tag panel and
-  metadata line have not yet been exercised in a live shell run.
-- Phase 7 (graph) is covered by tests only so far: the builder and the layout
-  algorithm are unit-tested, but nothing has rendered a graph in a live shell
-  run yet.
+- Phase 6 (tags/metadata): covered by tests; this document does not record a live
+  shell run of the tag panel or the metadata line.
+- Phase 7 (graph): first covered by tests alone, and that was not enough - once the
+  graph was actually looked at, two bugs turned up that the tests could not see (a
+  canvas two pixels tall, and a layout collapsed into the middle). See
+  "The graph, and two bugs that made it look empty".
 - Phase 9 (client sync) verified live end to end: a note pushed from a temp
   vault arrives on the server; a change made by a second device is pulled into
   the vault file; a tombstone from another device deletes the local file; a note
@@ -937,3 +943,11 @@ fine" went unverified for nine phases. It is possible, and worth doing:
   syncs once at startup without anyone asking, an automatic failure pauses it and
   says so, the pause is not repeated on every tick, a manual success lifts it, and
   creating a note arms the debounce. 222 tests pass (152 Core, 34 Data, 36 Server).
+- State on 2026-10-03: `dotnet test src/MdBolsa.sln` is green with 475 tests - 387
+  Core, 34 Data, 54 Server. **27 of those 54 are end-to-end and were skipped** in
+  that run, because the dev stack was not up (Docker Desktop 4.41.2 would not start
+  on the machine that day: its backend exits at "initializing Inference manager"
+  on a stale `dockerInference` socket). Until then they had reported *passed* in
+  about a millisecond each, returning early; they now report skipped. So the sync,
+  attachment, device-token and history paths were not re-verified against a live
+  server in that pass - run them with the stack up before relying on them.

@@ -32,8 +32,8 @@ services:
       # at an old data directory.
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      # Bound to localhost only: the server has no authentication (Phase 8), so it
-      # must not be reachable from the network, even in development.
+      # Bound to localhost only: the password above is committed to the repo, so
+      # this database must not be reachable from the network, even in development.
       - "127.0.0.1:5432:5432"
     volumes:
       # The microSD -> SSD migration point. Change APP_DATA_PATH, move the files,
