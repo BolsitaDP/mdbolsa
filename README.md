@@ -136,6 +136,13 @@ shell. There is no standalone `.exe` - this is a packaged WinUI 3 app, so it
 needs package identity; see [docs/development.md](docs/development.md) for why,
 and for the exact commands.
 
+The sync backend (PostgreSQL + the API) will live on the Raspberry Pi. Meanwhile it
+runs on this machine, without Docker: run **`backend.cmd`** (also `stop`, `status`,
+`reset -Force`). The first start downloads a portable PostgreSQL 16; everything it
+creates lives outside the repository, and nothing listens beyond `localhost`. See
+[docs/development.md](docs/development.md#run-the-backend-locally) and
+[0017](docs/decisions/0017-local-backend-without-docker.md).
+
 ## Structure
 
 ```

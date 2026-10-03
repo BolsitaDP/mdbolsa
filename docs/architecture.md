@@ -944,10 +944,13 @@ fine" went unverified for nine phases. It is possible, and worth doing:
   says so, the pause is not repeated on every tick, a manual success lifts it, and
   creating a note arms the debounce. 222 tests pass (152 Core, 34 Data, 36 Server).
 - State on 2026-10-03: `dotnet test src/MdBolsa.sln` is green with 475 tests - 387
-  Core, 34 Data, 54 Server. **27 of those 54 are end-to-end and were skipped** in
-  that run, because the dev stack was not up (Docker Desktop 4.41.2 would not start
-  on the machine that day: its backend exits at "initializing Inference manager"
-  on a stale `dockerInference` socket). Until then they had reported *passed* in
-  about a millisecond each, returning early; they now report skipped. So the sync,
-  attachment, device-token and history paths were not re-verified against a live
-  server in that pass - run them with the stack up before relying on them.
+  Core, 34 Data, 54 Server - and, run with `MDBOLSA_REQUIRE_SERVER=1` against the
+  local backend (`backend.cmd`, [0017](decisions/0017-local-backend-without-docker.md)),
+  **all 475 executed and passed, none skipped**. Worth saying why that sentence
+  exists: 27 of the 54 server tests are end-to-end (sync, attachments, device
+  tokens, history), and until that day they returned early and were counted as
+  *passed* in about a millisecond each; they now report skipped when the stack is
+  down. On a clean install of the backend (fresh directory, fresh download) the
+  same 54 pass. What this does not show: `docker-compose.prod.yml` has still never
+  been brought up, and the local backend is a Windows build of PostgreSQL 16, not
+  the Pi's Linux container.
