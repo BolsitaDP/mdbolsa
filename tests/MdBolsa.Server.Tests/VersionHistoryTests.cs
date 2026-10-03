@@ -16,8 +16,6 @@ public class VersionHistoryTests : IDisposable
     private const string BaseAddress = "http://localhost:5080/";
     private const string Token = "dev-token-not-a-secret";
 
-    private static readonly bool ServerAvailable = ProbeServer();
-
     private readonly string _vaultRoot = Directory.CreateTempSubdirectory("mdbolsa-history-").FullName;
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"mdbolsa-history-{Guid.NewGuid()}.db");
     private readonly Guid _deviceId = Guid.NewGuid();
@@ -28,7 +26,7 @@ public class VersionHistoryTests : IDisposable
     {
         Directory.Delete(_vaultRoot, recursive: true);
         if (File.Exists(_dbPath)) File.Delete(_dbPath);
-        if (!ServerAvailable || _noteId is null) return;
+        if (!DevStack.Available || _noteId is null) return;
 
         try
         {
@@ -69,19 +67,6 @@ public class VersionHistoryTests : IDisposable
         }
     }
 
-    private static bool ProbeServer()
-    {
-        try
-        {
-            using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            return probe.GetAsync($"{BaseAddress}health").GetAwaiter().GetResult().IsSuccessStatusCode;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            return false;
-        }
-    }
-
     // Unique per test run, because the server allows one note per path.
     private string Folder => $"{_deviceId.ToString()[..8]}/History.md";
 
@@ -108,11 +93,9 @@ public class VersionHistoryTests : IDisposable
         return response.StatusCode;
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task TheFirstVersionOfANoteIsStillReadableAfterASecondWrite()
     {
-        if (!ServerAvailable) return;
-
         _noteId = Guid.NewGuid();
         var first = UtcNow();
 
@@ -133,11 +116,9 @@ public class VersionHistoryTests : IDisposable
         Assert.Equal("# First", history[1].Content);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task ADeletedNoteKeepsItsContentInTheHistory()
     {
-        if (!ServerAvailable) return;
-
         _noteId = Guid.NewGuid();
         var when = UtcNow();
         await PutAsync(_deviceId, 1, "# Doomed but recoverable", when);
@@ -161,11 +142,9 @@ public class VersionHistoryTests : IDisposable
         Assert.DoesNotContain(history, v => v.IsCurrent);
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task RefusedWrites_LeaveNoHistory()
     {
-        if (!ServerAvailable) return;
-
         _noteId = Guid.NewGuid();
         var when = UtcNow();
         await PutAsync(_deviceId, 1, "# Current", when.AddMinutes(1));
@@ -183,11 +162,9 @@ public class VersionHistoryTests : IDisposable
         Assert.DoesNotContain(history, v => v.Content == "# Stale");
     }
 
-    [Fact]
+    [RequiresServerFact]
     public async Task AnUnknownNotesHistoryIsEmpty()
     {
-        if (!ServerAvailable) return;
-
         var resolver = new ConflictResolver(
             Client(), _deviceId, Token, new SqliteSyncStateStore(_dbPath), new SqliteVaultIndex(_dbPath));
 
