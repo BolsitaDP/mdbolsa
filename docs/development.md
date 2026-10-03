@@ -28,18 +28,55 @@ PostgreSQL**. Without them those tests are reported as **skipped**, with the
 reason - not as passed - so read the totals: `Passed: 27, Skipped: 27` means the
 sync paths were *not* exercised.
 
-To run them for real:
+To run them for real, start the backend (either way below), then:
 
 ```bash
-docker compose up -d                              # Postgres, 127.0.0.1:5432
-dotnet run --project src/Server/MdBolsa.Server    # the API, http://localhost:5080
-dotnet test tests/MdBolsa.Server.Tests            # in another terminal
+dotnet test tests/MdBolsa.Server.Tests
 ```
 
 Set `MDBOLSA_REQUIRE_SERVER=1` to make a missing stack a **failure** instead of
 a skip - use it before tagging a release, where green has to mean tested. The
 tests tidy up the rows they create, so they can be run repeatedly against the
 shared development database; they never touch anything but `localhost`.
+
+## Run the backend locally
+
+The backend will live on the Raspberry Pi. While developing, it runs on this
+machine - PostgreSQL plus the API, listening on `127.0.0.1:5432` and
+`http://localhost:5080`, with throwaway development credentials. Pick one:
+
+**Without Docker** (the default here; see
+[0017](decisions/0017-local-backend-without-docker.md)):
+
+```bash
+backend.cmd                 # start: installs PostgreSQL on first use, then the API
+backend.cmd status
+backend.cmd stop
+backend.cmd reset -Force    # delete the local database
+```
+
+`backend.cmd` is a thin wrapper over [`scripts/dev-backend.ps1`](../scripts/dev-backend.ps1).
+The first start downloads PostgreSQL 16 (about 300 MB, checked against a pinned
+SHA-256) and unpacks it under `%LOCALAPPDATA%\MdBolsa.Backend.Dev` - **outside the
+repository on purpose**: this repo sits in a OneDrive folder, and a live database
+inside a synced folder gets its files locked and uploaded mid-write. Nothing is
+installed system-wide and no administrator rights are needed. It only ever stops
+processes it started itself.
+
+**With Docker** (the same shape as the Pi):
+
+```bash
+docker compose up -d                              # Postgres, 127.0.0.1:5432
+dotnet run --project src/Server/MdBolsa.Server    # the API, http://localhost:5080
+```
+
+Both want port 5432, so run one at a time; the script says so if Docker's
+PostgreSQL is in the way. They keep **separate data**: notes synced into one are
+not in the other.
+
+Then, in the app: **Sync settings** -> server URL `http://localhost:5080`, token
+`dev-token-not-a-secret` (the throwaway one in `appsettings.Development.json`), and
+press **Create this device's token**.
 
 ## Run the Desktop Shell
 

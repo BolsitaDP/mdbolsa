@@ -17,6 +17,12 @@ docker compose up -d          # Postgres 16, published on 127.0.0.1:5432 only
 dotnet run --project src/Server/MdBolsa.Server
 ```
 
+No Docker (or Docker Desktop won't start)? `backend.cmd` runs the same two pieces -
+a portable PostgreSQL 16 and the API - directly on Windows; see
+[development.md](development.md#run-the-backend-locally) and
+[0017](decisions/0017-local-backend-without-docker.md). It is for development only:
+the Pi runs `docker-compose.prod.yml`, below.
+
 The API listens on <http://localhost:5080>. `GET /health` reports the
 environment, the database it resolved, the schema version, and which
 authentication is in force:
