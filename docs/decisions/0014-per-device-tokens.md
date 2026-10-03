@@ -13,7 +13,7 @@ loud what it did not buy.
 
 Two things have changed since, and both moved the cost of the shared token up.
 
-**Attachments (0011-attachments).** With a shared token, anyone holding it can now
+**Attachments (0016-attachments).** With a shared token, anyone holding it can now
 *upload*. That is not just reading somebody's notes any more - it is spending
 their disk, filling their database with data they will then have to store and back
 up, and putting arbitrary bytes where a client will render them. A read-only leak

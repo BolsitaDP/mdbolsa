@@ -17,7 +17,7 @@ namespace MdBolsa.Server.Endpoints;
 //
 // The one thing that is *not* like notes is that there is nothing to arbitrate: the
 // hash is the identity, so the same upload twice is the same single row, and no
-// response here is ever a conflict. See docs/decisions/0011-attachments.md.
+// response here is ever a conflict. See docs/decisions/0016-attachments.md.
 public static class AttachmentEndpoints
 {
     public static IEndpointRouteBuilder MapAttachmentEndpoints(this IEndpointRouteBuilder app, TokenAuthenticator auth)

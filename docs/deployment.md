@@ -30,10 +30,17 @@ The schema is created on boot, so there is no migration step to run.
 
 ## Adding a device, and taking one away
 
-The shared token (`Sync:Token`, or `Mdb:Token` in appsettings) is the only
-credential that can manage devices. Everything below needs it, and a device
+The shared token (`Sync:Token`, or the `Sync__Token` environment variable) is the
+only credential that can manage devices. Everything below needs it, and a device
 token gets **401** on all of it - one stolen laptop must not be able to hand
 itself a permanent key.
+
+In development the shared token is the throwaway one in
+`src/Server/MdBolsa.Server/appsettings.Development.json`:
+
+```bash
+export MDBOLSA_TOKEN=dev-token-not-a-secret
+```
 
 Give a machine its own token:
 
@@ -73,27 +80,32 @@ five minutes: it answers "when was this machine last here", not "when did this
 request happen".
 
 
-Verify the API end to end:
+Verify the API end to end. `/health` needs no token; every `/api/...` route does
+(a missing or wrong one is a **401**), so each call below carries
+`X-MdBolsa-Token`:
 
 ```bash
 # health
 curl http://localhost:5080/health
 
 # store a note (the ids are the note's frontmatter id and the acting device)
-curl -X PUT http://localhost:5080/api/notes/<guid> -H 'Content-Type: application/json' -d '{
+curl -X PUT http://localhost:5080/api/notes/<guid> \
+  -H "X-MdBolsa-Token: $MDBOLSA_TOKEN" -H 'Content-Type: application/json' -d '{
   "id": "<guid>", "relativePath": "Personal/Home.md", "title": "Home",
   "content": "# Home", "contentHash": "HASH", "revision": 1,
   "deviceId": "<guid>", "updatedAt": "2026-09-26T12:00:00Z"
 }'
 
 # read it back
-curl http://localhost:5080/api/notes/<guid>
+curl http://localhost:5080/api/notes/<guid> -H "X-MdBolsa-Token: $MDBOLSA_TOKEN"
 
 # everything that changed since a point, oldest first, paged
-curl "http://localhost:5080/api/notes/changes?since=2026-01-01T00:00:00Z&limit=200"
+curl "http://localhost:5080/api/notes/changes?since=2026-01-01T00:00:00Z&limit=200" \
+  -H "X-MdBolsa-Token: $MDBOLSA_TOKEN"
 
 # delete (tombstone, not a hard delete)
-curl -X DELETE http://localhost:5080/api/notes/<guid> -H 'X-MdBolsa-Device: <guid>'
+curl -X DELETE http://localhost:5080/api/notes/<guid> \
+  -H "X-MdBolsa-Token: $MDBOLSA_TOKEN" -H 'X-MdBolsa-Device: <guid>'
 ```
 
 `nextCursor` from `/changes` is passed back as `cursorAt` + `cursorId` to get the
@@ -121,16 +133,28 @@ Required environment (all of them, every one):
 | `APP_DATA_PATH` | The single root for all persistent state. The microSD → SSD migration point. |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Real credentials, generated for the Pi. |
 | `ConnectionStrings__Postgres` | Full Npgsql connection string the API uses. |
+| `Sync__Token` | The shared (bootstrap) token. Generate a long random value for the Pi; never reuse the development one. |
 
-Two properties are enforced, not documented-and-hoped-for:
+Three properties are enforced, not documented-and-hoped-for:
 
 - **The API refuses to start in Production without `ConnectionStrings__Postgres`.**
   There is no default. A development build cannot reach production by accident.
-- **Nothing is published to the network until you put a reverse proxy in front
-  of it — and the API has no authentication yet** (see
-  [0010](decisions/0010-server-foundation.md)). On a home network, keep it
-  bound to localhost and reach it over a VPN or an SSH tunnel. Do not port-forward
-  an unauthenticated note store to the internet.
+- **The API refuses to start in Production without `Sync__Token`.** An
+  unauthenticated note store is not a production configuration, so there is no
+  default and no "open" mode. `docker-compose.prod.yml` requires the variable too,
+  so a missing one fails at `docker compose up` rather than as a container that
+  starts and exits.
+- **Nothing is published to the network until you decide to.** The API is
+  authenticated ([0011](decisions/0011-client-sync.md), and revocable per device
+  since [0014](decisions/0014-per-device-tokens.md)), but it speaks plain HTTP, so
+  a token crosses the wire in the clear. On a home network, keep it bound to
+  loopback and reach it over a VPN or an SSH tunnel; if it must be reachable
+  otherwise, put a reverse proxy with TLS in front of it first. Do not
+  port-forward it to the internet as it stands.
+
+Once it is up, use the shared token once to give each machine a token of its own
+(see "Adding a device, and taking one away" above), and keep the shared one out of
+the clients.
 
 ## microSD → SSD migration
 

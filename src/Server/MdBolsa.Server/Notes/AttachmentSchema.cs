@@ -11,7 +11,7 @@ public static class AttachmentSchema
 
     // The cap is a design decision, not a technical limit: 32 MB covers a screenshot,
     // a scan and a PDF of a document, and is far below "this is a video". See
-    // docs/decisions/0011-attachments.md.
+    // docs/decisions/0016-attachments.md.
     public const long MaxAttachmentBytes = 32L * 1024 * 1024;
 
     public static async Task InitialiseAsync(string connectionString, CancellationToken cancellationToken = default)
@@ -64,7 +64,7 @@ public static class AttachmentSchema
                 -- whole point rather than an omission. Content-addressed data has one
                 -- version: a byte sequence is either here or it is not, so there is
                 -- nothing to conflict about and no history to keep. The trade is in
-                -- docs/decisions/0011-attachments.md.
+                -- docs/decisions/0016-attachments.md.
                 CREATE TABLE IF NOT EXISTS attachments (
                     hash         text        PRIMARY KEY,
                     size         bigint      NOT NULL,

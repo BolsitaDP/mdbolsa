@@ -52,10 +52,16 @@ services:
       # the dev/prod isolation from vision.md §7 - there is deliberately no
       # fallback value.
       ConnectionStrings__Postgres: ${ConnectionStrings__Postgres:?set the production connection string in .env}
-    # Bound to loopback: the API has NO AUTHENTICATION yet (Phase 8), so it must
-    # not be reachable from the network. Put a reverse proxy with TLS in front of
-    # it - and add authentication first - before exposing it. See
-    # docs/decisions/0010-server-foundation.md.
+      # Required too: Program.cs throws in Production without a shared token ("an
+      # unauthenticated note store is not a production configuration"). It is
+      # the bootstrap credential that mints a revocable token per device - see
+      # docs/decisions/0014-per-device-tokens.md. Without this line the container
+      # starts and exits at once, which is not how anyone wants to learn it.
+      Sync__Token: ${Sync__Token:?set Sync__Token in .env}
+    # Bound to loopback: the API is token-authenticated, but it speaks plain HTTP,
+    # so the token crosses the wire in the clear. Reach it over a VPN or an SSH
+    # tunnel, or put a reverse proxy with TLS in front of it, before exposing it.
+    # See docs/deployment.md.
     ports:
       - "127.0.0.1:8080:8080"
     networks: [mdbolsa]
